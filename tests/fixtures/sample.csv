@@ -1,0 +1,5 @@
+id,enabled,host,cli,model,agent,prompt,project_dir,schedule_type,schedule_value,order,depends_on,output_dir,output_format,output_filename
+fetch-docs,true,,claude-code,sonnet,,Fetch and summarize docs,~/projects/example,frequency,1h,1,,~/agent-output,markdown,{id}-{timestamp}.{ext}
+analyze-code,true,,codex,o3,,Analyze code quality,~/projects/example,frequency,2h,2,fetch-docs,~/agent-output,json,{id}-{timestamp}.{ext}
+daily-review,true,,gemini,gemini-2.5-pro,,Review PRs,~/projects/example,time,09:00,1,,~/agent-output,text,{id}-{timestamp}.{ext}
+disabled-task,false,,opencode,gpt-4.1,,Should be skipped,~/projects/example,frequency,30m,1,,,text,{id}-{timestamp}.{ext}
