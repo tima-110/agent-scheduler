@@ -1,6 +1,6 @@
 # Configuration Guide
 
-This guide covers how to set up the Google Sheet, configure `.env`, and define tasks for agent-scheduler.
+This guide covers how to set up the Google Sheet, configure `config.toml`, and define tasks for agent-scheduler.
 
 ## Table of Contents
 
@@ -10,13 +10,15 @@ This guide covers how to set up the Google Sheet, configure `.env`, and define t
 - [Execution Order and Dependencies](#execution-order-and-dependencies)
 - [Output Configuration](#output-configuration)
 - [Multi-Host Setup](#multi-host-setup)
-- [Environment Configuration (.env)](#environment-configuration-env)
+- [Configuration File (config.toml)](#configuration-file-configtoml)
 - [Example Task Rows](#example-task-rows)
 - [Validation](#validation)
 
 ---
 
 ## Google Sheet Setup
+
+> **Quick path:** Run `agent-scheduler init` for interactive guided setup. The steps below are for manual configuration or reference.
 
 1. **Create a new Google Sheet** (or use an existing one).
 
@@ -34,9 +36,14 @@ This guide covers how to set up the Google Sheet, configure `.env`, and define t
    ```
    The sheet ID is: `1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms`
 
-5. **Set `GOOGLE_SHEET_ID`** in your `.env` file to this value.
+5. **Set the sheet ID** in your `config.toml` under `[sheets]`:
 
-6. If your tasks are on a worksheet other than `Sheet1`, also set `GOOGLE_SHEET_NAME`.
+   ```toml
+   [sheets]
+   id = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+   ```
+
+6. If your tasks are on a worksheet other than `Sheet1`, also set `name` under `[sheets]`.
 
 ---
 
@@ -56,7 +63,7 @@ This guide covers how to set up the Google Sheet, configure `.env`, and define t
 | `schedule_value` | string | Yes | For `time`: `HH:MM` (24h). For `frequency`: `Nh` or `Nm`. | `09:00` or `1h` or `30m` |
 | `order` | integer | No | Execution priority within a batch. Lower numbers run first. Ties run concurrently. Default: `0`. | `1` |
 | `depends_on` | string | No | Comma-separated task `id`s. This task waits for all listed tasks to succeed. | `fetch-docs,lint-code` |
-| `output_dir` | path | No | Where to write output files. `~`-relative. Falls back to `OUTPUT_DIR` from `.env`. | `~/agent-output/reviews` |
+| `output_dir` | path | No | Where to write output files. `~`-relative. Falls back to `output_dir` in `config.toml`. | `~/agent-output/reviews` |
 | `output_format` | enum | No | `text`, `json`, or `markdown`. Default: `text`. | `markdown` |
 | `output_filename` | string | No | Filename template. Default: `{id}-{timestamp}.{ext}`. | `{id}-{timestamp}.{ext}` |
 
@@ -137,7 +144,7 @@ Each successful task writes its stdout to a file.
 
 ### `output_dir`
 
-Per-task output directory. Supports `~`-relative paths. If blank, falls back to the global `OUTPUT_DIR` from `.env`.
+Per-task output directory. Supports `~`-relative paths. If blank, falls back to the global `output_dir` from `config.toml` (default: `~/agent-output`).
 
 ### `output_format`
 
@@ -183,10 +190,10 @@ A single Google Sheet can drive tasks across multiple machines. Each machine:
 ### Finding your hostname
 
 ```bash
-python3 -c "import socket; print(socket.gethostname())"
+agent-scheduler whoami
 ```
 
-This is the value to put in the `host` column.
+This prints the resolved hostname — either your config alias or the system default. Use this value in the `host` column.
 
 ### Host column patterns
 
@@ -196,48 +203,72 @@ This is the value to put in the `host` column.
 | `macbook-pro` | Runs only on `macbook-pro` |
 | `macbook-pro,dev-server` | Runs on `macbook-pro` and `dev-server` |
 
+### Hostname aliases
+
+System hostnames can be opaque (e.g., `BMC-C02DT03GML85`). Set a friendly alias in `config.toml`:
+
+```toml
+hostname = "my-macbook"
+```
+
+Use this alias in the sheet's `host` column instead of the raw system hostname. If unset, `socket.gethostname()` is used.
+
 ### Per-machine setup
 
 Each machine needs:
 
 1. `agent-scheduler` installed (`pipx install .`)
-2. A `.env` file (can be identical across machines — paths use `~`)
+2. A `config.toml` in the platform config directory (can be identical across machines — paths use `~`)
 3. `gws` CLI authorized (`gws auth login`)
 4. The relevant agent CLIs installed and authenticated
 5. `agent-scheduler install` to set up the local schedule
 
 ---
 
-## Environment Configuration (.env)
+## Configuration File (config.toml)
 
-Copy `.env.example` to `.env` and edit:
+The config file lives at the platform-standard location:
 
-```dotenv
-# Google Sheets
-GOOGLE_SHEET_ID=1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
-GOOGLE_SHEET_NAME=Sheet1
+- **macOS:** `~/Library/Application Support/agent-scheduler/config.toml`
+- **Linux:** `~/.config/agent-scheduler/config.toml`
 
-# Paths (all support ~)
-TASKS_CSV=~/.local/share/agent-scheduler/tasks.csv
-OUTPUT_DIR=~/agent-output
-STATE_DB=~/.local/share/agent-scheduler/state.db
-LOG_FILE=~/.local/log/agent-scheduler.log
+Override with `--config /path/to/config.toml` on any command.
 
-# Schedule backend: auto | cron | launchd
-SCHEDULE_BACKEND=auto
+Copy `config.example.toml` from the repo to get started:
+
+```toml
+# Hostname alias (optional — defaults to system hostname)
+# hostname = "my-macbook"
+
+[sheets]
+id = "YOUR_GOOGLE_SHEET_ID"
+name = "Sheet1"
+
+# [paths]
+# tasks_csv = "~/custom/path/tasks.csv"
+# output_dir = "~/agent-output"
+# state_db = "~/custom/path/state.db"
+# log_file = "~/custom/path/agent-scheduler.log"
+
+# [schedule]
+# backend = "auto"
 ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GOOGLE_SHEET_ID` | *(none)* | The ID from your Google Sheet URL |
-| `GOOGLE_SHEET_NAME` | `Sheet1` | Worksheet tab name |
-| `TASKS_CSV` | `~/.local/share/agent-scheduler/tasks.csv` | Where the synced CSV is stored locally |
-| `OUTPUT_DIR` | `~/agent-output` | Default output directory (used when a task has no `output_dir`) |
-| `STATE_DB` | `~/.local/share/agent-scheduler/state.db` | SQLite database path |
-| `LOG_FILE` | `~/.local/log/agent-scheduler.log` | Log file path |
-| `SCHEDULE_BACKEND` | `auto` | `auto` (launchd on macOS, cron elsewhere), `cron`, or `launchd` |
+### Settings reference
 
-You can also pass `--config/-c` to any command to use an alternate `.env` file.
+| Section | Key | Default | Description |
+|---------|-----|---------|-------------|
+| *(top-level)* | `hostname` | system hostname | Friendly alias for task filtering |
+| `[sheets]` | `id` | *(none)* | Google Sheet ID from the URL |
+| `[sheets]` | `name` | `Sheet1` | Worksheet tab name |
+| `[paths]` | `tasks_csv` | platform data dir / `tasks.csv` | Where the synced CSV is stored |
+| `[paths]` | `output_dir` | `~/agent-output` | Default output directory |
+| `[paths]` | `state_db` | platform data dir / `state.db` | SQLite database path |
+| `[paths]` | `log_file` | platform log dir / `agent-scheduler.log` | Log file path |
+| `[schedule]` | `backend` | `auto` | `auto`, `cron`, or `launchd` |
+
+**Platform data dir:** macOS `~/Library/Application Support/agent-scheduler/`, Linux `~/.local/share/agent-scheduler/`
+**Platform log dir:** macOS `~/Library/Logs/agent-scheduler/`, Linux `~/.local/state/agent-scheduler/log/`
 
 ---
 

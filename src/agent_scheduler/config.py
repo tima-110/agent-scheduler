@@ -2,12 +2,15 @@
 
 import csv
 import socket
+import tomllib
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+import platformdirs
 from pydantic import BaseModel, field_validator
-from pydantic_settings import BaseSettings
+
+APP_NAME = "agent-scheduler"
 
 
 class CLIChoice(str, Enum):
@@ -73,22 +76,44 @@ class TaskEntry(BaseModel):
             return 0
         return int(v)
 
-    def runs_on_this_host(self) -> bool:
+    def runs_on_this_host(self, hostname: str) -> bool:
         if not self.host:
             return True
-        return socket.gethostname() in self.host
+        return hostname in self.host
 
 
-class AppConfig(BaseSettings):
+def _default_data_dir() -> Path:
+    return Path(platformdirs.user_data_dir(APP_NAME))
+
+
+def _default_config_dir() -> Path:
+    return Path(platformdirs.user_config_dir(APP_NAME))
+
+
+def _default_log_dir() -> Path:
+    return Path(platformdirs.user_log_dir(APP_NAME))
+
+
+class AppConfig(BaseModel):
     google_sheet_id: str = ""
     google_sheet_name: str = "Sheet1"
-    tasks_csv: Path = Path("~/.local/share/agent-scheduler/tasks.csv")
+    hostname: Optional[str] = None
+    tasks_csv: Path = None
     output_dir: Path = Path("~/agent-output")
-    state_db: Path = Path("~/.local/share/agent-scheduler/state.db")
-    log_file: Path = Path("~/.local/log/agent-scheduler.log")
+    state_db: Path = None
+    log_file: Path = None
     schedule_backend: str = "auto"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    def model_post_init(self, __context):
+        if self.tasks_csv is None:
+            self.tasks_csv = _default_data_dir() / "tasks.csv"
+        if self.state_db is None:
+            self.state_db = _default_data_dir() / "state.db"
+        if self.log_file is None:
+            self.log_file = _default_log_dir() / "agent-scheduler.log"
+
+    def get_hostname(self) -> str:
+        return self.hostname or socket.gethostname()
 
     def resolve_paths(self) -> "AppConfig":
         return self.model_copy(update={
@@ -99,12 +124,49 @@ class AppConfig(BaseSettings):
         })
 
 
+def default_config_path() -> Path:
+    return _default_config_dir() / "config.toml"
+
+
+def load_config(path: Path | None = None) -> AppConfig:
+    config_path = path or default_config_path()
+    if not config_path.exists():
+        return AppConfig()
+
+    with open(config_path, "rb") as f:
+        raw = tomllib.load(f)
+
+    flat = {}
+    # [sheets] section
+    sheets = raw.get("sheets", {})
+    if "id" in sheets:
+        flat["google_sheet_id"] = sheets["id"]
+    if "name" in sheets:
+        flat["google_sheet_name"] = sheets["name"]
+
+    # top-level hostname
+    if "hostname" in raw:
+        flat["hostname"] = raw["hostname"]
+
+    # [paths] section
+    paths = raw.get("paths", {})
+    for key in ("tasks_csv", "output_dir", "state_db", "log_file"):
+        if key in paths:
+            flat[key] = Path(paths[key])
+
+    # [schedule] section
+    schedule = raw.get("schedule", {})
+    if "backend" in schedule:
+        flat["schedule_backend"] = schedule["backend"]
+
+    return AppConfig(**flat)
+
+
 def load_tasks(csv_path: Path) -> list[TaskEntry]:
     tasks = []
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Strip whitespace from keys and values
             cleaned = {k.strip(): v.strip() if v else v for k, v in row.items()}
             tasks.append(TaskEntry(**cleaned))
     return tasks

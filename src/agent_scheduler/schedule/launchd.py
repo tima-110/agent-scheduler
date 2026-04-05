@@ -4,11 +4,18 @@ import plistlib
 import subprocess
 from pathlib import Path
 
+import platformdirs
+
 LABEL = "com.agent-scheduler"
 PLIST_PATH = Path("~/Library/LaunchAgents") / f"{LABEL}.plist"
 
 
+def _log_dir() -> Path:
+    return Path(platformdirs.user_log_dir("agent-scheduler"))
+
+
 def _plist_content(executable: str) -> dict:
+    log_dir = _log_dir()
     return {
         "Label": LABEL,
         "ProgramArguments": [executable, "run", "--no-sync"],
@@ -17,8 +24,8 @@ def _plist_content(executable: str) -> dict:
         "EnvironmentVariables": {
             "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
         },
-        "StandardOutPath": str(Path("~/.local/log/agent-scheduler-stdout.log").expanduser()),
-        "StandardErrorPath": str(Path("~/.local/log/agent-scheduler-stderr.log").expanduser()),
+        "StandardOutPath": str(log_dir / "stdout.log"),
+        "StandardErrorPath": str(log_dir / "stderr.log"),
     }
 
 
@@ -26,7 +33,6 @@ def install_launchd(executable: str = "agent-scheduler") -> None:
     plist_path = PLIST_PATH.expanduser()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Unload first if already loaded
     if plist_path.exists():
         subprocess.run(
             ["launchctl", "unload", "-w", str(plist_path)],
@@ -37,8 +43,7 @@ def install_launchd(executable: str = "agent-scheduler") -> None:
     with open(plist_path, "wb") as f:
         plistlib.dump(content, f)
 
-    # Create log directory
-    Path("~/.local/log").expanduser().mkdir(parents=True, exist_ok=True)
+    _log_dir().mkdir(parents=True, exist_ok=True)
 
     subprocess.run(
         ["launchctl", "load", "-w", str(plist_path)],

@@ -20,7 +20,7 @@ class AgentRunner(ABC):
     @abstractmethod
     def build_command(self, task: TaskEntry) -> list[str]: ...
 
-    def run(self, task: TaskEntry, output_dir=None, dry_run: bool = False) -> AgentResult:
+    def run(self, task: TaskEntry, output_dir=None, hostname: str = "", dry_run: bool = False) -> AgentResult:
         cmd = self.build_command(task)
         if dry_run:
             return AgentResult(task.id, 0, "success")
@@ -31,5 +31,5 @@ class AgentRunner(ABC):
         )
         status = "success" if result.returncode == 0 else "failed"
         if status == "success" and output_dir:
-            write_output(result.stdout, task, output_dir)
+            write_output(result.stdout, task, output_dir, hostname)
         return AgentResult(task.id, result.returncode, status, result.stderr)

@@ -5,16 +5,14 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-_DEFAULT_DB = Path("~/.local/share/agent-scheduler/state.db")
 
-
-def _connect(db_path: Path | None = None) -> sqlite3.Connection:
-    path = (db_path or _DEFAULT_DB).expanduser()
+def _connect(db_path: Path) -> sqlite3.Connection:
+    path = db_path.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(str(path))
 
 
-def init_db(db_path: Path | None = None) -> None:
+def init_db(db_path: Path) -> None:
     with _connect(db_path) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -29,8 +27,7 @@ def init_db(db_path: Path | None = None) -> None:
         """)
 
 
-def get_last_run(task_id: str, db_path: Path | None = None) -> datetime | None:
-    hostname = socket.gethostname()
+def get_last_run(task_id: str, *, db_path: Path, hostname: str) -> datetime | None:
     with _connect(db_path) as conn:
         row = conn.execute(
             "SELECT ran_at FROM runs WHERE task_id = ? AND host = ? ORDER BY ran_at DESC LIMIT 1",
@@ -46,9 +43,10 @@ def record_run(
     status: str,
     exit_code: int | None = None,
     error_msg: str = "",
-    db_path: Path | None = None,
+    *,
+    db_path: Path,
+    hostname: str,
 ) -> None:
-    hostname = socket.gethostname()
     now = datetime.now().isoformat()
     with _connect(db_path) as conn:
         conn.execute(
@@ -57,8 +55,7 @@ def record_run(
         )
 
 
-def get_all_runs(db_path: Path | None = None) -> list[dict]:
-    hostname = socket.gethostname()
+def get_all_runs(*, db_path: Path, hostname: str) -> list[dict]:
     with _connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
@@ -68,8 +65,7 @@ def get_all_runs(db_path: Path | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_task_runs(task_id: str, db_path: Path | None = None) -> list[dict]:
-    hostname = socket.gethostname()
+def get_task_runs(task_id: str, *, db_path: Path, hostname: str) -> list[dict]:
     with _connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(

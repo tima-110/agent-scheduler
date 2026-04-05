@@ -1,0 +1,25 @@
+# agent-scheduler configuration
+# Copy to the platform config directory and edit:
+#   macOS:  ~/Library/Application Support/agent-scheduler/config.toml
+#   Linux:  ~/.config/agent-scheduler/config.toml
+# Or pass --config /path/to/config.toml to any command.
+
+# Hostname alias (optional — defaults to system hostname)
+# Run `agent-scheduler whoami` to see the current value.
+# hostname = "my-macbook"
+
+[sheets]
+id = "YOUR_GOOGLE_SHEET_ID"
+name = "Sheet1"
+
+# Paths (all support ~; defaults are platform-appropriate)
+# Uncomment to override.
+# [paths]
+# tasks_csv = "~/.local/share/agent-scheduler/tasks.csv"
+# output_dir = "~/agent-output"
+# state_db = "~/.local/share/agent-scheduler/state.db"
+# log_file = "~/.local/log/agent-scheduler.log"
+
+# Schedule backend: auto | cron | launchd
+# [schedule]
+# backend = "auto"

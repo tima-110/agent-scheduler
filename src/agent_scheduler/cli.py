@@ -1,37 +1,32 @@
 """CLI application — typer app with all subcommands."""
 
+import socket
 from pathlib import Path
 from typing import Optional
 
 import typer
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
-from .config import AppConfig, load_tasks
+from .config import AppConfig, default_config_path, load_config, load_tasks
 from .schedule import install_schedule, uninstall_schedule
 from .scheduler import run_pass
 from .sheet_sync import check_gws_available, sync_sheet
-from .state import get_last_run, get_task_runs, init_db
+from .state import get_task_runs, init_db
 from .validate import print_validation
-
-load_dotenv()
 
 app = typer.Typer(name="agent-scheduler", help="Scheduled execution of AI coding agent CLIs.")
 console = Console()
 
 
 def _get_config(config_path: Optional[Path] = None) -> AppConfig:
-    if config_path:
-        cfg = AppConfig(_env_file=str(config_path))
-    else:
-        cfg = AppConfig()
+    cfg = load_config(config_path)
     return cfg.resolve_paths()
 
 
 @app.command()
 def sync(
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to .env config file"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.toml"),
 ):
     """Pull Google Sheet to local tasks CSV."""
     cfg = _get_config(config)
@@ -51,6 +46,7 @@ def run(
     """Execute one full scheduling pass."""
     cfg = _get_config(config)
     csv_file = csv_path or cfg.tasks_csv
+    hostname = cfg.get_hostname()
 
     if not no_sync:
         try:
@@ -60,7 +56,7 @@ def run(
 
     init_db(cfg.state_db)
     tasks = load_tasks(csv_file)
-    run_pass(tasks, dry_run=dry_run, db_path=cfg.state_db, output_dir=cfg.output_dir)
+    run_pass(tasks, dry_run=dry_run, db_path=cfg.state_db, hostname=hostname, output_dir=cfg.output_dir)
 
 
 @app.command()
@@ -98,6 +94,7 @@ def status(
     """Show schedule entry status and last run per task."""
     cfg = _get_config(config)
     csv_file = csv_path or cfg.tasks_csv
+    hostname = cfg.get_hostname()
 
     from .schedule.cron import is_installed as cron_installed
     from .schedule.launchd import is_installed as launchd_installed
@@ -119,9 +116,9 @@ def status(
     table.add_column("Status")
 
     for t in tasks:
-        if not t.runs_on_this_host():
+        if not t.runs_on_this_host(hostname):
             continue
-        runs = get_task_runs(t.id, db_path=cfg.state_db)
+        runs = get_task_runs(t.id, db_path=cfg.state_db, hostname=hostname)
         if runs:
             last = runs[0]
             table.add_row(t.id, str(t.enabled), last["ran_at"], last["status"])
@@ -139,6 +136,8 @@ def list_tasks(
     """Show a rich table of tasks applicable to this host."""
     cfg = _get_config(config)
     csv_file = csv_path or cfg.tasks_csv
+    hostname = cfg.get_hostname()
+
     tasks = load_tasks(csv_file)
 
     table = Table(title="Tasks for this host")
@@ -151,7 +150,7 @@ def list_tasks(
     table.add_column("Enabled")
 
     for t in tasks:
-        if not t.runs_on_this_host():
+        if not t.runs_on_this_host(hostname):
             continue
         sched = f"{t.schedule_type.value}: {t.schedule_value}"
         deps = ", ".join(t.depends_on) if t.depends_on else "—"
@@ -172,3 +171,104 @@ def validate(
     ok = print_validation(tasks)
     if not ok:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def whoami(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+):
+    """Print the hostname used for task filtering."""
+    cfg = _get_config(config)
+    resolved = cfg.get_hostname()
+    system = socket.gethostname()
+
+    if cfg.hostname:
+        console.print(f"Hostname:        [bold]{resolved}[/bold] (from config)")
+        console.print(f"System hostname: {system}")
+    else:
+        console.print(f"Hostname: [bold]{resolved}[/bold] (system default)")
+    console.print(f"\nUse this value in the [bold]host[/bold] column of your Google Sheet.")
+
+
+@app.command()
+def init():
+    """Interactive guided setup — create config, verify gws, test sheet connectivity."""
+    config_path = default_config_path()
+    console.print(f"\n[bold]agent-scheduler init[/bold]")
+    console.print(f"Config location: [cyan]{config_path}[/cyan]\n")
+
+    # Check for existing config
+    if config_path.exists():
+        overwrite = typer.confirm("Config file already exists. Overwrite?", default=False)
+        if not overwrite:
+            console.print("Keeping existing config.")
+            raise typer.Exit()
+
+    # Prompt for settings
+    console.print("[dim]Tip: Find the Sheet ID in the URL between /d/ and /edit[/dim]")
+    sheet_id = typer.prompt("Google Sheet ID")
+    sheet_name = typer.prompt("Worksheet name", default="Sheet1")
+
+    system_hostname = socket.gethostname()
+    console.print(f"\nSystem hostname: [bold]{system_hostname}[/bold]")
+    use_alias = typer.confirm("Set a friendly hostname alias?", default=False)
+    hostname_alias = None
+    if use_alias:
+        hostname_alias = typer.prompt("Hostname alias")
+
+    # Write config
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    if hostname_alias:
+        lines.append(f'hostname = "{hostname_alias}"')
+        lines.append("")
+    lines.append("[sheets]")
+    lines.append(f'id = "{sheet_id}"')
+    lines.append(f'name = "{sheet_name}"')
+    config_path.write_text("\n".join(lines) + "\n")
+    console.print(f"\n[green]Config written to {config_path}[/green]")
+
+    # Load the config we just wrote
+    cfg = load_config(config_path).resolve_paths()
+    resolved_hostname = cfg.get_hostname()
+    console.print(f"Hostname: [bold]{resolved_hostname}[/bold]")
+
+    # Verify gws
+    console.print("\n[bold]Checking gws CLI...[/bold]")
+    try:
+        check_gws_available()
+        console.print("[green]gws is installed and authorized.[/green]")
+    except RuntimeError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        console.print("[yellow]You can still configure tasks, but sync/run will fail until gws is set up.[/yellow]")
+        init_db(cfg.state_db)
+        console.print(f"\n[green]Setup complete.[/green] Run [bold]gws auth login[/bold], then [bold]agent-scheduler sync[/bold].")
+        return
+
+    # Test sheet connectivity
+    console.print("\n[bold]Testing sheet connectivity...[/bold]")
+    try:
+        sync_sheet(cfg.google_sheet_id, cfg.google_sheet_name, cfg.tasks_csv)
+        tasks = load_tasks(cfg.tasks_csv)
+        console.print(f"[green]Synced {len(tasks)} task(s) from the sheet.[/green]")
+    except Exception as e:
+        console.print(f"[red]Sheet sync failed: {e}[/red]")
+        console.print("[yellow]Check your Sheet ID and worksheet name, then try [bold]agent-scheduler sync[/bold].[/yellow]")
+        init_db(cfg.state_db)
+        return
+
+    # Init state DB
+    init_db(cfg.state_db)
+
+    # Summary
+    console.print(f"\n[bold green]Setup complete![/bold green]")
+    console.print(f"  Config:   {config_path}")
+    console.print(f"  Hostname: {resolved_hostname}")
+    console.print(f"  Tasks:    {len(tasks)} found")
+    console.print(f"  CSV:      {cfg.tasks_csv}")
+    console.print(f"  State DB: {cfg.state_db}")
+    console.print(f"\nNext steps:")
+    console.print(f"  agent-scheduler list       — view tasks for this host")
+    console.print(f"  agent-scheduler validate   — check for config errors")
+    console.print(f"  agent-scheduler run --dry-run — preview execution")
+    console.print(f"  agent-scheduler install    — set up the 30-min schedule")

@@ -33,29 +33,33 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# 1. Configure
-cp .env.example .env
-# Edit .env — set GOOGLE_SHEET_ID to your spreadsheet ID
+# 1. Run the guided setup (creates config, verifies gws, tests sheet access)
+agent-scheduler init
 
-# 2. Set up your Google Sheet (see docs/config-guide.md)
-
-# 3. Sync the spreadsheet to local CSV
-agent-scheduler sync
-
-# 4. Validate your task configuration
+# 2. Validate your task configuration
 agent-scheduler validate
 
-# 5. Preview what would run
+# 3. Preview what would run
 agent-scheduler run --dry-run
 
-# 6. Run a scheduling pass manually
+# 4. Run a scheduling pass manually
 agent-scheduler run --no-sync
 
-# 7. Install the 30-minute orchestrator schedule
+# 5. Install the 30-minute orchestrator schedule
 agent-scheduler install
 ```
 
+The `init` command prompts for your Google Sheet ID, worksheet name, and optional hostname alias, then writes `config.toml`, verifies gws is authorized, and confirms it can read the sheet. See [docs/config-guide.md](docs/config-guide.md) for manual setup and the full column reference.
+
 ## CLI Reference
+
+### `agent-scheduler init`
+
+Interactive guided setup. Prompts for Google Sheet ID, worksheet name, and hostname alias. Creates `config.toml`, verifies gws authorization, tests sheet connectivity, and initializes the state database.
+
+```
+agent-scheduler init
+```
 
 ### `agent-scheduler sync`
 
@@ -128,6 +132,16 @@ Checks:
 - No circular dependencies
 - `project_dir` paths exist on this machine
 
+### `agent-scheduler whoami`
+
+Print the hostname used for task filtering.
+
+```
+agent-scheduler whoami [--config/-c PATH]
+```
+
+Shows the resolved hostname (from `config.toml` alias or system default). Use this value in the `host` column of your Google Sheet.
+
 ## How It Works
 
 ### Scheduling
@@ -161,18 +175,31 @@ Each successful task's stdout is written to a file in the configured output dire
 A single Google Sheet can drive multiple machines. Each machine:
 
 - Filters tasks by the `host` column (comma-separated hostnames; blank = all hosts)
-- Maintains its own SQLite database at `~/.local/share/agent-scheduler/state.db`
+- Maintains its own SQLite database (platform-standard location)
 - Uses `~`-relative paths that expand correctly per machine
 
 Find your machine's hostname with:
 
 ```bash
-python3 -c "import socket; print(socket.gethostname())"
+agent-scheduler whoami
+```
+
+You can set a friendly alias in `config.toml` so you don't have to use the raw system hostname:
+
+```toml
+hostname = "my-macbook"
 ```
 
 ## Configuration
 
-See [docs/config-guide.md](docs/config-guide.md) for the full spreadsheet column reference, `.env` options, example task rows, and multi-host patterns.
+Configuration lives in a `config.toml` file at the platform-standard location:
+
+- **macOS:** `~/Library/Application Support/agent-scheduler/config.toml`
+- **Linux:** `~/.config/agent-scheduler/config.toml`
+
+Override with `--config /path/to/config.toml` on any command.
+
+See [docs/config-guide.md](docs/config-guide.md) for the full spreadsheet column reference, config.toml options, example task rows, and multi-host patterns.
 
 ## Development
 

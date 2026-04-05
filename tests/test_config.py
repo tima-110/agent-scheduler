@@ -1,15 +1,18 @@
-"""Tests for config.py — CSV parsing, host filtering, path expansion."""
+"""Tests for config.py — CSV parsing, host filtering, path expansion, TOML loading."""
 
 import socket
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from agent_scheduler.config import (
+    AppConfig,
     CLIChoice,
     OutputFormat,
     ScheduleType,
     TaskEntry,
+    load_config,
     load_tasks,
 )
 
@@ -36,13 +39,13 @@ def test_task_fields():
 
 def test_depends_on_parsing():
     tasks = load_tasks(FIXTURE)
-    t = tasks[1]  # analyze-code depends on fetch-docs
+    t = tasks[1]
     assert t.depends_on == ["fetch-docs"]
 
 
 def test_empty_depends_on():
     tasks = load_tasks(FIXTURE)
-    t = tasks[0]  # fetch-docs has no deps
+    t = tasks[0]
     assert t.depends_on == []
 
 
@@ -55,7 +58,23 @@ def test_disabled_task():
 def test_host_filtering_empty_runs_everywhere():
     tasks = load_tasks(FIXTURE)
     for t in tasks:
-        assert t.runs_on_this_host() is True  # all have empty host
+        assert t.runs_on_this_host("any-host") is True
+
+
+def test_host_filtering_with_alias():
+    t = TaskEntry(
+        id="test",
+        enabled=True,
+        host=["my-laptop"],
+        cli=CLIChoice.claude_code,
+        model="sonnet",
+        prompt="test",
+        project_dir=Path("/tmp"),
+        schedule_type=ScheduleType.frequency,
+        schedule_value="1h",
+    )
+    assert t.runs_on_this_host("my-laptop") is True
+    assert t.runs_on_this_host("other-host") is False
 
 
 def test_host_filtering_specific():
@@ -70,7 +89,7 @@ def test_host_filtering_specific():
         schedule_type=ScheduleType.frequency,
         schedule_value="1h",
     )
-    assert t.runs_on_this_host() is True
+    assert t.runs_on_this_host(socket.gethostname()) is True
 
 
 def test_host_filtering_other():
@@ -85,7 +104,7 @@ def test_host_filtering_other():
         schedule_type=ScheduleType.frequency,
         schedule_value="1h",
     )
-    assert t.runs_on_this_host() is False
+    assert t.runs_on_this_host("my-host") is False
 
 
 def test_path_expansion():
@@ -93,3 +112,61 @@ def test_path_expansion():
     t = tasks[0]
     assert "~" not in str(t.project_dir)
     assert t.project_dir.is_absolute()
+
+
+# --- TOML config loading ---
+
+def test_load_config_defaults_when_missing():
+    cfg = load_config(Path("/nonexistent/config.toml"))
+    assert cfg.google_sheet_id == ""
+    assert cfg.google_sheet_name == "Sheet1"
+    assert cfg.hostname is None
+    assert cfg.schedule_backend == "auto"
+
+
+def test_load_config_from_toml():
+    content = b"""
+hostname = "my-macbook"
+
+[sheets]
+id = "abc123"
+name = "Tasks"
+
+[paths]
+output_dir = "~/custom-output"
+
+[schedule]
+backend = "launchd"
+"""
+    with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as f:
+        f.write(content)
+        f.flush()
+        cfg = load_config(Path(f.name))
+
+    assert cfg.google_sheet_id == "abc123"
+    assert cfg.google_sheet_name == "Tasks"
+    assert cfg.hostname == "my-macbook"
+    assert cfg.output_dir == Path("~/custom-output")
+    assert cfg.schedule_backend == "launchd"
+    Path(f.name).unlink()
+
+
+def test_get_hostname_with_alias():
+    cfg = AppConfig(hostname="my-laptop")
+    assert cfg.get_hostname() == "my-laptop"
+
+
+def test_get_hostname_without_alias():
+    cfg = AppConfig()
+    assert cfg.get_hostname() == socket.gethostname()
+
+
+def test_default_paths_are_platform_appropriate():
+    cfg = AppConfig()
+    # Should not contain hardcoded ~/.local/share on any platform
+    # Just verify they're set and non-empty
+    assert cfg.tasks_csv is not None
+    assert cfg.state_db is not None
+    assert cfg.log_file is not None
+    assert str(cfg.tasks_csv).endswith("tasks.csv")
+    assert str(cfg.state_db).endswith("state.db")

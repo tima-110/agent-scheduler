@@ -1,14 +1,13 @@
 """Output formatting and file writing."""
 
 import json
-import socket
 from datetime import datetime
 from pathlib import Path
 
 from ..config import TaskEntry
 
 
-def write_output(raw_stdout: str, task: TaskEntry, global_output_dir: Path) -> Path:
+def write_output(raw_stdout: str, task: TaskEntry, global_output_dir: Path, hostname: str) -> Path:
     dest = (task.output_dir or global_output_dir).expanduser()
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -22,7 +21,7 @@ def write_output(raw_stdout: str, task: TaskEntry, global_output_dir: Path) -> P
         "json": json.dumps(
             {
                 "task_id": task.id,
-                "host": socket.gethostname(),
+                "host": hostname,
                 "ran_at": timestamp,
                 "output": raw_stdout,
             },

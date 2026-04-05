@@ -7,9 +7,8 @@ dependencies = [
     "typer[all]>=0.12",
     "rich>=13",
     "pydantic>=2",
-    "pydantic-settings>=2",
+    "platformdirs>=4",
     "python-crontab>=3",
-    "python-dotenv>=1",
 ]
 
 [project.scripts]

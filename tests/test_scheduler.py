@@ -15,6 +15,8 @@ from agent_scheduler.scheduler import (
 )
 from agent_scheduler.state import init_db, record_run
 
+HOSTNAME = "test-host"
+
 
 def _task(id, schedule_type="frequency", schedule_value="1h", depends_on=None, order=0):
     return TaskEntry(
@@ -55,7 +57,7 @@ def test_is_due_frequency_never_run():
     db = Path(tempfile.mktemp(suffix=".db"))
     init_db(db)
     t = _task("t1", schedule_value="1h")
-    assert is_due(t, datetime.now(), db_path=db) is True
+    assert is_due(t, datetime.now(), db_path=db, hostname=HOSTNAME) is True
     db.unlink()
 
 
@@ -63,9 +65,8 @@ def test_is_due_frequency_not_yet():
     db = Path(tempfile.mktemp(suffix=".db"))
     init_db(db)
     t = _task("t1", schedule_value="1h")
-    record_run("t1", "success", 0, db_path=db)
-    # Just ran, so not due yet
-    assert is_due(t, datetime.now(), db_path=db) is False
+    record_run("t1", "success", 0, db_path=db, hostname=HOSTNAME)
+    assert is_due(t, datetime.now(), db_path=db, hostname=HOSTNAME) is False
     db.unlink()
 
 
@@ -73,16 +74,15 @@ def test_is_due_frequency_overdue():
     db = Path(tempfile.mktemp(suffix=".db"))
     init_db(db)
     t = _task("t1", schedule_value="1h")
-    record_run("t1", "success", 0, db_path=db)
+    record_run("t1", "success", 0, db_path=db, hostname=HOSTNAME)
     future = datetime.now() + timedelta(hours=2)
-    assert is_due(t, future, db_path=db) is True
+    assert is_due(t, future, db_path=db, hostname=HOSTNAME) is True
     db.unlink()
 
 
 def test_topological_batches_no_deps():
     tasks = [_task("a", order=1), _task("b", order=2)]
     batches = topological_batches(tasks)
-    # Both should be in one batch since no deps
     assert len(batches) == 1
     assert len(batches[0]) == 2
 
@@ -102,4 +102,4 @@ def test_topological_batches_concurrent_same_order():
     t3 = _task("c", order=2, depends_on=["a", "b"])
     batches = topological_batches([t1, t2, t3])
     assert len(batches) == 2
-    assert len(batches[0]) == 2  # a and b concurrent
+    assert len(batches[0]) == 2
