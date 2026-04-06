@@ -7,10 +7,10 @@ from agent_scheduler.agents.claude_code import ClaudeCodeRunner
 from agent_scheduler.agents.codex import CodexRunner
 from agent_scheduler.agents.gemini import GeminiRunner
 from agent_scheduler.agents.opencode import OpenCodeRunner
-from agent_scheduler.config import CLIChoice, ScheduleType, TaskEntry
+from agent_scheduler.config import CLIChoice, OutputFormat, ScheduleType, TaskEntry
 
 
-def _task(cli, model="sonnet", agent=None, prompt="do something"):
+def _task(cli, model="sonnet", agent=None, prompt="do something", output_format=OutputFormat.text):
     return TaskEntry(
         id="test-task",
         enabled=True,
@@ -21,6 +21,7 @@ def _task(cli, model="sonnet", agent=None, prompt="do something"):
         project_dir=Path("/tmp"),
         schedule_type=ScheduleType.frequency,
         schedule_value="1h",
+        output_format=output_format,
     )
 
 
@@ -29,6 +30,27 @@ def test_claude_code_command():
     runner = ClaudeCodeRunner()
     cmd = runner.build_command(t)
     assert cmd == ["claude", "--model", "sonnet", "--print", "analyze this"]
+
+
+def test_claude_code_no_model():
+    t = _task(CLIChoice.claude_code, model="", prompt="analyze this")
+    runner = ClaudeCodeRunner()
+    cmd = runner.build_command(t)
+    assert cmd == ["claude", "--print", "analyze this"]
+
+
+def test_claude_code_json_output_format():
+    t = _task(CLIChoice.claude_code, model="sonnet", prompt="analyze", output_format=OutputFormat.json)
+    runner = ClaudeCodeRunner()
+    cmd = runner.build_command(t)
+    assert cmd == ["claude", "--model", "sonnet", "--output-format", "json", "--print", "analyze"]
+
+
+def test_claude_code_text_output_format_no_flag():
+    t = _task(CLIChoice.claude_code, model="sonnet", prompt="analyze", output_format=OutputFormat.text)
+    runner = ClaudeCodeRunner()
+    cmd = runner.build_command(t)
+    assert "--output-format" not in cmd
 
 
 def test_claude_code_with_agent():

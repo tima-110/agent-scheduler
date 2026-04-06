@@ -6,4 +6,8 @@ from .base import AgentRunner
 
 class OpenCodeRunner(AgentRunner):
     def build_command(self, task: TaskEntry) -> list[str]:
-        return ["opencode", "run", "--model", task.model, task.prompt]
+        cmd = ["opencode", "run"]
+        if task.model:
+            cmd.extend(["--model", task.model])
+        cmd.append(task.prompt)
+        return cmd

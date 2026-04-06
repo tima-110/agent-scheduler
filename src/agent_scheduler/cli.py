@@ -11,7 +11,7 @@ from rich.table import Table
 from .config import AppConfig, default_config_path, load_config, load_tasks
 from .schedule import install_schedule, uninstall_schedule
 from .scheduler import run_pass
-from .sheet_sync import check_gws_available, sync_sheet
+from .sheet_sync import check_gws_available, is_sheet_empty, sync_sheet, write_header_row
 from .state import get_task_runs, init_db
 from .validate import print_validation
 
@@ -247,12 +247,23 @@ def init():
 
     # Test sheet connectivity
     console.print("\n[bold]Testing sheet connectivity...[/bold]")
+    task_count = 0
     try:
-        sync_sheet(cfg.google_sheet_id, cfg.google_sheet_name, cfg.tasks_csv)
-        tasks = load_tasks(cfg.tasks_csv)
-        console.print(f"[green]Synced {len(tasks)} task(s) from the sheet.[/green]")
+        empty = is_sheet_empty(cfg.google_sheet_id, cfg.google_sheet_name)
+        if empty:
+            console.print("[yellow]Sheet is empty — no header row found.[/yellow]")
+            if typer.confirm("Write the header row now?", default=True):
+                write_header_row(cfg.google_sheet_id)
+                console.print("[green]Header row written.[/green]")
+            else:
+                console.print("Skipped. Add the header row manually or run [bold]agent-scheduler setup-sheet[/bold].")
+        else:
+            sync_sheet(cfg.google_sheet_id, cfg.google_sheet_name, cfg.tasks_csv)
+            tasks = load_tasks(cfg.tasks_csv)
+            task_count = len(tasks)
+            console.print(f"[green]Synced {task_count} task(s) from the sheet.[/green]")
     except Exception as e:
-        console.print(f"[red]Sheet sync failed: {e}[/red]")
+        console.print(f"[red]Sheet access failed: {e}[/red]")
         console.print("[yellow]Check your Sheet ID and worksheet name, then try [bold]agent-scheduler sync[/bold].[/yellow]")
         init_db(cfg.state_db)
         return
@@ -264,7 +275,7 @@ def init():
     console.print(f"\n[bold green]Setup complete![/bold green]")
     console.print(f"  Config:   {config_path}")
     console.print(f"  Hostname: {resolved_hostname}")
-    console.print(f"  Tasks:    {len(tasks)} found")
+    console.print(f"  Tasks:    {task_count} found")
     console.print(f"  CSV:      {cfg.tasks_csv}")
     console.print(f"  State DB: {cfg.state_db}")
     console.print(f"\nNext steps:")
@@ -272,3 +283,26 @@ def init():
     console.print(f"  agent-scheduler validate   — check for config errors")
     console.print(f"  agent-scheduler run --dry-run — preview execution")
     console.print(f"  agent-scheduler install    — set up the 30-min schedule")
+
+
+@app.command(name="setup-sheet")
+def setup_sheet(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+):
+    """Write the header row to an empty Google Sheet."""
+    cfg = _get_config(config)
+    check_gws_available()
+
+    try:
+        empty = is_sheet_empty(cfg.google_sheet_id, cfg.google_sheet_name)
+    except Exception as e:
+        console.print(f"[red]Could not read sheet: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    if not empty:
+        console.print("[yellow]Sheet already has data. Header row not written.[/yellow]")
+        console.print("To avoid duplicating headers, clear the sheet first if you want to reset it.")
+        raise typer.Exit(code=1)
+
+    write_header_row(cfg.google_sheet_id)
+    console.print("[green]Header row written to the sheet.[/green]")

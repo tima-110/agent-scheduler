@@ -1,6 +1,6 @@
 """Pydantic models for task configuration and app settings."""
 
-import csv
+import json
 import socket
 import tomllib
 from enum import Enum
@@ -36,7 +36,7 @@ class TaskEntry(BaseModel):
     enabled: bool
     host: list[str] = []
     cli: CLIChoice
-    model: str
+    model: str = ""
     agent: Optional[str] = None
     prompt: str
     project_dir: Path
@@ -106,7 +106,7 @@ class AppConfig(BaseModel):
 
     def model_post_init(self, __context):
         if self.tasks_csv is None:
-            self.tasks_csv = _default_data_dir() / "tasks.csv"
+            self.tasks_csv = _default_data_dir() / "tasks.json"
         if self.state_db is None:
             self.state_db = _default_data_dir() / "state.db"
         if self.log_file is None:
@@ -162,11 +162,11 @@ def load_config(path: Path | None = None) -> AppConfig:
     return AppConfig(**flat)
 
 
-def load_tasks(csv_path: Path) -> list[TaskEntry]:
+def load_tasks(tasks_path: Path) -> list[TaskEntry]:
+    with open(tasks_path) as f:
+        rows = json.load(f)
     tasks = []
-    with open(csv_path, newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            cleaned = {k.strip(): v.strip() if v else v for k, v in row.items()}
-            tasks.append(TaskEntry(**cleaned))
+    for row in rows:
+        cleaned = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
+        tasks.append(TaskEntry(**cleaned))
     return tasks

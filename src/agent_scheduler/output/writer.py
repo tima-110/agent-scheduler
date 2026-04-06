@@ -1,6 +1,5 @@
-"""Output formatting and file writing."""
+"""Output file writing."""
 
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -15,20 +14,6 @@ def write_output(raw_stdout: str, task: TaskEntry, global_output_dir: Path, host
     ext = {"text": "txt", "json": "json", "markdown": "md"}[task.output_format.value]
     filename = task.output_filename.format(id=task.id, timestamp=timestamp, ext=ext)
 
-    content = {
-        "text": raw_stdout,
-        "markdown": f"# {task.id} — {timestamp}\n\n{raw_stdout}",
-        "json": json.dumps(
-            {
-                "task_id": task.id,
-                "host": hostname,
-                "ran_at": timestamp,
-                "output": raw_stdout,
-            },
-            indent=2,
-        ),
-    }[task.output_format.value]
-
     path = dest / filename
-    path.write_text(content)
+    path.write_text(raw_stdout)
     return path

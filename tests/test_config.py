@@ -1,4 +1,4 @@
-"""Tests for config.py — CSV parsing, host filtering, path expansion, TOML loading."""
+"""Tests for config.py — JSON parsing, host filtering, path expansion, TOML loading."""
 
 import socket
 import tempfile
@@ -16,7 +16,7 @@ from agent_scheduler.config import (
     load_tasks,
 )
 
-FIXTURE = Path(__file__).parent / "fixtures" / "sample.csv"
+FIXTURE = Path(__file__).parent / "fixtures" / "sample.json"
 
 
 def test_load_tasks_count():
@@ -168,5 +168,5 @@ def test_default_paths_are_platform_appropriate():
     assert cfg.tasks_csv is not None
     assert cfg.state_db is not None
     assert cfg.log_file is not None
-    assert str(cfg.tasks_csv).endswith("tasks.csv")
+    assert str(cfg.tasks_csv).endswith("tasks.json")
     assert str(cfg.state_db).endswith("state.db")
