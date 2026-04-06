@@ -22,10 +22,10 @@ This guide covers how to set up the Google Sheet, configure `config.toml`, and d
 
 1. **Create a new Google Sheet** (or use an existing one).
 
-2. **Add the header row** with exactly these column names. Column order is flexible — the CSV export uses headers, not position.
+2. **Add the header row** with exactly these column names. Column order is flexible — the sync uses headers, not position.
 
    ```
-   id | enabled | host | cli | model | agent | prompt | project_dir | schedule_type | schedule_value | order | depends_on | output_dir | output_format | output_filename
+   id | enabled | host | cli | model | agent | prompt | project_dir | schedule_type | schedule_value | order | depends_on | output_dir | output_format | output_filename | cli_args
    ```
 
 3. **Share the sheet** with the Google account authorized in `gws`. The `gws` CLI handles authentication — no service accounts or API keys are stored by agent-scheduler.
@@ -55,7 +55,7 @@ This guide covers how to set up the Google Sheet, configure `config.toml`, and d
 | `enabled` | boolean | Yes | `true` or `false`. Disabled tasks are skipped entirely. | `true` |
 | `host` | string | No | Comma-separated hostnames. Task runs only on listed hosts. **Blank = runs on all hosts.** | `macbook-pro,dev-server` |
 | `cli` | enum | Yes | Which agent CLI to invoke. One of: `claude-code`, `codex`, `gemini`, `opencode`. | `claude-code` |
-| `model` | string | Yes | Model name passed to the CLI's `--model` flag. | `sonnet` |
+| `model` | string | No | Model name passed to the CLI's `--model` flag. If blank, the CLI uses its own default. | `sonnet` |
 | `agent` | string | No | Named agent/persona. Currently only used by Claude Code (`--agent` flag). | `reviewer` |
 | `prompt` | string | Yes | The prompt text sent to the agent CLI. | `Review open PRs and summarize findings` |
 | `project_dir` | path | Yes | Working directory for the CLI invocation. Supports `~`-relative paths. | `~/projects/my-app` |
@@ -66,6 +66,7 @@ This guide covers how to set up the Google Sheet, configure `config.toml`, and d
 | `output_dir` | path | No | Where to write output files. `~`-relative. Falls back to `output_dir` in `config.toml`. | `~/agent-output/reviews` |
 | `output_format` | enum | No | `text`, `json`, or `markdown`. Default: `text`. | `markdown` |
 | `output_filename` | string | No | Filename template. Default: `{id}-{timestamp}.{ext}`. | `{id}-{timestamp}.{ext}` |
+| `cli_args` | string | No | Extra CLI flags appended to the command. Parsed with shell-style splitting (supports quoted args). | `--max-budget-usd 0.50 --verbose` |
 
 ### Column Value Notes
 
@@ -140,7 +141,7 @@ Circular dependency chains (A depends on B, B depends on A) are caught by `agent
 
 ## Output Configuration
 
-Each successful task writes its stdout to a file.
+Each successful task writes the CLI's stdout verbatim to a file. The `output_format` setting controls the file extension and, for supported CLIs, is passed as a native flag so the CLI produces formatted output directly.
 
 ### `output_dir`
 
@@ -148,11 +149,29 @@ Per-task output directory. Supports `~`-relative paths. If blank, falls back to 
 
 ### `output_format`
 
-| Format | Extension | Content |
-|--------|-----------|---------|
-| `text` | `.txt` | Raw stdout |
-| `markdown` | `.md` | `# {task_id} — {timestamp}` header + stdout |
-| `json` | `.json` | Structured object with `task_id`, `host`, `ran_at`, `output` |
+| Format | Extension | CLI behavior |
+|--------|-----------|-------------|
+| `text` | `.txt` | No format flag passed; raw stdout saved as-is |
+| `json` | `.json` | Format flag passed to CLI (see below); stdout saved as-is |
+| `markdown` | `.md` | `--output-format markdown` passed to Claude Code and Gemini; stdout saved as-is |
+
+The scheduler writes stdout verbatim — the CLI is responsible for producing the correct format. JSON output flag per CLI:
+
+| CLI | Flag |
+|-----|------|
+| Claude Code | `--output-format json` |
+| Gemini | `--output-format json` |
+| Codex | `--json` (JSONL events) |
+| OpenCode | `--format json` |
+
+### `cli_args`
+
+Freeform extra flags appended to the CLI command. Use this for any CLI-specific options not covered by other columns. Parsed with `shlex.split` so quoted arguments are handled correctly.
+
+Examples:
+- `--max-budget-usd 0.50` — limit API spend per run (Claude Code)
+- `--full-auto` — enable automatic execution (Codex)
+- `--json` — JSONL output (Codex exec)
 
 ### `output_filename`
 
@@ -245,7 +264,7 @@ id = "YOUR_GOOGLE_SHEET_ID"
 name = "Sheet1"
 
 # [paths]
-# tasks_csv = "~/custom/path/tasks.csv"
+# tasks_csv = "~/custom/path/tasks.json"
 # output_dir = "~/agent-output"
 # state_db = "~/custom/path/state.db"
 # log_file = "~/custom/path/agent-scheduler.log"
@@ -261,7 +280,7 @@ name = "Sheet1"
 | *(top-level)* | `hostname` | system hostname | Friendly alias for task filtering |
 | `[sheets]` | `id` | *(none)* | Google Sheet ID from the URL |
 | `[sheets]` | `name` | `Sheet1` | Worksheet tab name |
-| `[paths]` | `tasks_csv` | platform data dir / `tasks.csv` | Where the synced CSV is stored |
+| `[paths]` | `tasks_csv` | platform data dir / `tasks.json` | Where the synced tasks file is stored |
 | `[paths]` | `output_dir` | `~/agent-output` | Default output directory |
 | `[paths]` | `state_db` | platform data dir / `state.db` | SQLite database path |
 | `[paths]` | `log_file` | platform log dir / `agent-scheduler.log` | Log file path |
@@ -340,4 +359,4 @@ Validation failed with 2 error(s):
   x Task 'report' depends on unknown task 'missing-task'
 ```
 
-Fix the errors in the Google Sheet, run `agent-scheduler sync`, and validate again.
+Fix the errors in the Google Sheet, run `agent-scheduler sync` to re-pull, and validate again.

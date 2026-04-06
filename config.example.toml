@@ -15,7 +15,7 @@ name = "Sheet1"
 # Paths (all support ~; defaults are platform-appropriate)
 # Uncomment to override.
 # [paths]
-# tasks_csv = "~/.local/share/agent-scheduler/tasks.csv"
+# tasks_csv = "~/.local/share/agent-scheduler/tasks.json"
 # output_dir = "~/agent-output"
 # state_db = "~/.local/share/agent-scheduler/state.db"
 # log_file = "~/.local/log/agent-scheduler.log"

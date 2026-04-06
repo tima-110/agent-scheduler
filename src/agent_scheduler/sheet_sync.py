@@ -9,6 +9,7 @@ HEADER_COLUMNS = [
     "id", "enabled", "host", "cli", "model", "agent", "prompt",
     "project_dir", "schedule_type", "schedule_value", "order",
     "depends_on", "output_dir", "output_format", "output_filename",
+    "cli_args",
 ]
 
 

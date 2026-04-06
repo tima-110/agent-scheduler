@@ -2,16 +2,18 @@
 
 Scheduled execution of AI coding agent CLIs from a shared Google Sheet.
 
-agent-scheduler reads a task configuration spreadsheet, syncs it locally as CSV, resolves execution order and dependencies, runs the appropriate agent CLI (Claude Code, Codex CLI, Gemini CLI, or OpenCode), and records results in a local SQLite database. A single Google Sheet drives multiple machines — each host filters tasks by hostname and maintains independent state.
+agent-scheduler reads a task configuration spreadsheet, syncs it locally as JSON, resolves execution order and dependencies, runs the appropriate agent CLI (Claude Code, Codex CLI, Gemini CLI, or OpenCode), and records results in a local SQLite database. A single Google Sheet drives multiple machines — each host filters tasks by hostname and maintains independent state.
 
 ## Supported CLIs
 
 | CLI | Command shape |
 |-----|---------------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude --model <model> --print "<prompt>"` |
-| [Codex CLI](https://github.com/openai/codex) | `codex --model <model> "<prompt>"` |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini --model <model> -p "<prompt>"` |
-| [OpenCode](https://github.com/opencode-ai/opencode) | `opencode run --model <model> "<prompt>"` |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude [--model <model>] [--output-format json] --print "<prompt>"` |
+| [Codex CLI](https://github.com/openai/codex) | `codex exec [--model <model>] [--json] "<prompt>"` |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini [--model <model>] [--output-format json] -p "<prompt>"` |
+| [OpenCode](https://github.com/opencode-ai/opencode) | `opencode run [--model <model>] [--format json] "<prompt>"` |
+
+`--model` is only passed when set in the task config. Extra flags can be added via the `cli_args` column.
 
 ## Prerequisites
 
@@ -63,7 +65,7 @@ agent-scheduler init
 
 ### `agent-scheduler sync`
 
-Pull the Google Sheet to a local CSV file.
+Pull the Google Sheet to a local JSON file.
 
 ```
 agent-scheduler sync [--config/-c PATH]
@@ -80,8 +82,8 @@ agent-scheduler run [--config/-c PATH] [--csv/-f PATH] [--dry-run] [--no-sync] [
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Print intended actions with zero side effects |
-| `--no-sync` | Skip the Google Sheet sync step (use local CSV as-is) |
-| `--csv/-f` | Override the CSV path from config |
+| `--no-sync` | Skip the Google Sheet sync step (use local tasks file as-is) |
+| `--csv/-f` | Override the tasks file path from config |
 | `--verbose/-v` | Verbose output |
 
 ### `agent-scheduler install`
@@ -148,7 +150,7 @@ Shows the resolved hostname (from `config.toml` alias or system default). Use th
 
 The orchestrator runs every **30 minutes** via cron or launchd. Each pass:
 
-1. **Sync** — pulls the Google Sheet to a local CSV (skipped with `--no-sync`)
+1. **Sync** — pulls the Google Sheet to a local JSON file (skipped with `--no-sync`)
 2. **Filter** — keeps only tasks that are `enabled=true` and match this host
 3. **Due check** — determines which tasks are due based on their schedule type
 4. **Topological sort** — groups tasks into ordered batches using `depends_on` and `order`
@@ -168,7 +170,7 @@ If a task fails, all tasks that transitively depend on it are **skipped** and re
 
 ### Output
 
-Each successful task's stdout is written to a file in the configured output directory. Output format (`text`, `json`, `markdown`) and filename template are configurable per task. The scheduler never pipes output between tasks — if a downstream task needs upstream output, its prompt should reference the expected file path.
+Each successful task's stdout is written to a file in the configured output directory. The `output_format` setting controls the file extension and, for supported CLIs, is passed as a flag to the CLI itself (e.g. `--output-format json` for Claude Code) so the CLI produces native formatted output. The scheduler writes stdout verbatim to the output file. The scheduler never pipes output between tasks — if a downstream task needs upstream output, its prompt should reference the expected file path.
 
 ## Multi-Machine Setup
 
@@ -214,7 +216,7 @@ pytest tests/ -v
 ## Architecture
 
 ```
-Google Sheet  ──gws CLI──>  local CSV  ──load_tasks()──>  TaskEntry models
+Google Sheet  ──gws CLI──>  local JSON  ──load_tasks()──>  TaskEntry models
                                                                 │
                            SQLite DB  <──record_run()──  scheduler.run_pass()
                                                                 │

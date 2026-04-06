@@ -47,6 +47,7 @@ class TaskEntry(BaseModel):
     output_dir: Optional[Path] = None
     output_format: OutputFormat = OutputFormat.text
     output_filename: str = "{id}-{timestamp}.{ext}"
+    cli_args: str = ""
 
     @field_validator("depends_on", "host", mode="before")
     @classmethod

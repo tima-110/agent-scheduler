@@ -65,7 +65,7 @@ def test_codex_command():
     t = _task(CLIChoice.codex, model="o3", prompt="analyze")
     runner = CodexRunner()
     cmd = runner.build_command(t)
-    assert cmd == ["codex", "--model", "o3", "analyze"]
+    assert cmd == ["codex", "exec", "--model", "o3", "analyze"]
 
 
 def test_gemini_command():
@@ -80,6 +80,20 @@ def test_opencode_command():
     runner = OpenCodeRunner()
     cmd = runner.build_command(t)
     assert cmd == ["opencode", "run", "--model", "gpt-4.1", "check code"]
+
+
+def test_cli_args_appended():
+    t = _task(CLIChoice.claude_code, model="sonnet", prompt="analyze")
+    t.cli_args = '--max-budget-usd 0.50 --verbose'
+    runner = ClaudeCodeRunner()
+    cmd = runner.full_command(t)
+    assert cmd[-3:] == ["--max-budget-usd", "0.50", "--verbose"]
+
+
+def test_cli_args_empty_no_change():
+    t = _task(CLIChoice.claude_code, model="sonnet", prompt="analyze")
+    runner = ClaudeCodeRunner()
+    assert runner.full_command(t) == runner.build_command(t)
 
 
 def test_get_runner_factory():

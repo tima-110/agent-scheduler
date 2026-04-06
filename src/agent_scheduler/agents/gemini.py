@@ -9,5 +9,7 @@ class GeminiRunner(AgentRunner):
         cmd = ["gemini"]
         if task.model:
             cmd.extend(["--model", task.model])
+        if task.output_format.value != "text":
+            cmd.extend(["--output-format", task.output_format.value])
         cmd.extend(["-p", task.prompt])
         return cmd

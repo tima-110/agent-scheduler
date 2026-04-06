@@ -97,7 +97,7 @@ def run_pass(
         if dry_run:
             for task in runnable:
                 runner = get_runner(task.cli)
-                cmd = runner.build_command(task)
+                cmd = runner.full_command(task)
                 console.print(f"[cyan]\\[DRY RUN][/cyan] {task.id}: {' '.join(cmd)}")
                 results[task.id] = "dry_run"
             continue

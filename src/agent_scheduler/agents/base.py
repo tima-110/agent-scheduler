@@ -1,5 +1,6 @@
 """Abstract base for agent CLI runners."""
 
+import shlex
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -20,8 +21,14 @@ class AgentRunner(ABC):
     @abstractmethod
     def build_command(self, task: TaskEntry) -> list[str]: ...
 
-    def run(self, task: TaskEntry, output_dir=None, hostname: str = "", dry_run: bool = False) -> AgentResult:
+    def full_command(self, task: TaskEntry) -> list[str]:
         cmd = self.build_command(task)
+        if task.cli_args:
+            cmd.extend(shlex.split(task.cli_args))
+        return cmd
+
+    def run(self, task: TaskEntry, output_dir=None, hostname: str = "", dry_run: bool = False) -> AgentResult:
+        cmd = self.full_command(task)
         if dry_run:
             return AgentResult(task.id, 0, "success")
 
