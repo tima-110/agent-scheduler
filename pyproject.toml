@@ -1,8 +1,12 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "agent-handler"
 version = "0.1.0"
 description = "Scheduled execution of AI coding agent CLIs"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "typer[all]>=0.12",
     "rich>=13",
@@ -11,15 +15,15 @@ dependencies = [
     "python-crontab>=3",
 ]
 
-[project.scripts]
-agent-handler = "agent_handler.cli:app"
+[dependency-groups]
+dev = ["pytest>=8.0"]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[project.scripts]
+agent-handler = "agent_handler.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_handler"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]

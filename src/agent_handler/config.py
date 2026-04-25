@@ -1,17 +1,23 @@
 """Pydantic models for task configuration and app settings."""
+from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
+import subprocess
+import sys
 import tomllib
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 import platformdirs
 from pydantic import BaseModel, field_validator
 
 APP_NAME = "agent-handler"
+KEYCHAIN_SERVICE = "agent-handler"
+
+log = logging.getLogger(__name__)
 
 
 class CLIChoice(str, Enum):
@@ -39,14 +45,14 @@ class TaskEntry(BaseModel):
     host: list[str] = []
     cli: CLIChoice
     model: str = ""
-    agent: Optional[str] = None
+    agent: str | None = None
     prompt: str
     project_dir: Path
     schedule_type: ScheduleType
     schedule_value: str
     order: int = 0
     depends_on: list[str] = []
-    output_dir: Optional[Path] = None
+    output_dir: Path | None = None
     output_format: OutputFormat = OutputFormat.text
     output_filename: str = "{id}-{timestamp}.{ext}"
     cli_args: str = ""
@@ -99,9 +105,8 @@ def _default_log_dir() -> Path:
 
 class AppConfig(BaseModel):
     gas_url: str = ""
-    gas_api_key: str = ""
     google_sheet_name: str = "Sheet1"
-    hostname: Optional[str] = None
+    hostname: str | None = None
     tasks_csv: Path = None
     output_dir: Path = Path("~/agent-output")
     state_db: Path = None
@@ -115,9 +120,6 @@ class AppConfig(BaseModel):
             self.state_db = _default_data_dir() / "state.db"
         if self.log_file is None:
             self.log_file = _default_log_dir() / "agent-handler.log"
-        # Allow env var override for the API key
-        if not self.gas_api_key:
-            self.gas_api_key = os.environ.get("AGENT_HANDLER_GAS_KEY", "")
 
     def get_hostname(self) -> str:
         return self.hostname or socket.gethostname()
@@ -148,8 +150,6 @@ def load_config(path: Path | None = None) -> AppConfig:
     sheets = raw.get("sheets", {})
     if "gas_url" in sheets:
         flat["gas_url"] = sheets["gas_url"]
-    if "gas_api_key" in sheets:
-        flat["gas_api_key"] = sheets["gas_api_key"]
     if "name" in sheets:
         flat["google_sheet_name"] = sheets["name"]
 
@@ -179,3 +179,78 @@ def load_tasks(tasks_path: Path) -> list[TaskEntry]:
         cleaned = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
         tasks.append(TaskEntry(**cleaned))
     return tasks
+
+
+# ------------------------------------------------------------------
+# GAS credentials: keychain + env var resolution
+# ------------------------------------------------------------------
+
+class GASConfig(BaseModel):
+    """GAS API connection settings — resolved at runtime, never from TOML."""
+
+    endpoint_url: str
+    api_key: str
+
+
+def read_keychain(account: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def write_keychain(account: str, password: str) -> None:
+    subprocess.run(
+        ["security", "delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account],
+        capture_output=True, timeout=5,
+    )
+    result = subprocess.run(
+        ["security", "add-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", password],
+        capture_output=True, text=True, timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to write to keychain: {result.stderr.strip()}")
+
+
+def _resolve_secret(env_var: str, keychain_account: str) -> tuple[str, str] | tuple[None, None]:
+    value = os.environ.get(env_var)
+    if value:
+        return value, "env"
+    value = read_keychain(keychain_account)
+    if value:
+        return value, "keychain"
+    return None, None
+
+
+def load_gas_config(gas_url: str) -> GASConfig:
+    if not gas_url:
+        raise RuntimeError(
+            "gas_url is not set in config.toml. "
+            "Deploy the GAS script and set gas_url under [sheets]."
+        )
+    key, _ = _resolve_secret("AGENT_HANDLER_GAS_KEY", "AGENT_HANDLER_GAS_KEY")
+    if not key:
+        raise RuntimeError(
+            "Missing GAS API key. "
+            "Set via env var AGENT_HANDLER_GAS_KEY or run: agent-handler set-credentials"
+        )
+    return GASConfig(endpoint_url=gas_url, api_key=key)
+
+
+# ------------------------------------------------------------------
+# Logging setup
+# ------------------------------------------------------------------
+
+def setup_logging(verbose: bool = False, debug: bool = False) -> None:
+    level = logging.DEBUG if debug else (logging.INFO if verbose else logging.WARNING)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s  %(levelname)-7s  %(message)s",
+        stream=sys.stderr,
+    )

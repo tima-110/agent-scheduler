@@ -1,4 +1,5 @@
 """Gemini CLI runner."""
+from __future__ import annotations
 
 from ..config import TaskEntry
 from .base import AgentRunner

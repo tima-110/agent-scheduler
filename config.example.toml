@@ -10,7 +10,7 @@
 
 [sheets]
 gas_url = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
-gas_api_key = "your-secret-key"   # or set AGENT_HANDLER_GAS_KEY env var
+# API key: store via `agent-handler set-credentials` or env var AGENT_HANDLER_GAS_KEY
 name = "Sheet1"
 
 # Paths (all support ~; defaults are platform-appropriate)

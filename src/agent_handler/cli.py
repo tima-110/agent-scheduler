@@ -1,14 +1,29 @@
 """CLI application — typer app with all subcommands."""
+from __future__ import annotations
 
+import logging
 import socket
+from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import AppConfig, CLIChoice, OutputFormat, ScheduleType, default_config_path, load_config, load_tasks
+from .config import (
+    AppConfig,
+    CLIChoice,
+    GASConfig,
+    OutputFormat,
+    ScheduleType,
+    _resolve_secret,
+    default_config_path,
+    load_config,
+    load_gas_config,
+    load_tasks,
+    setup_logging,
+    write_keychain,
+)
 from .schedule import install_schedule, uninstall_schedule
 from .scheduler import run_pass
 from .sheet_sync import (
@@ -27,21 +42,70 @@ from .sheet_sync import (
 from .state import get_task_runs, init_db
 from .validate import print_validation
 
-app = typer.Typer(name="agent-handler", help="Scheduled execution of AI coding agent CLIs.")
+app = typer.Typer(
+    name="agent-handler",
+    no_args_is_help=True,
+    add_completion=False,
+)
 task_app = typer.Typer(help="Manage task rows in the Google Sheet.")
 app.add_typer(task_app, name="task")
 console = Console()
+err_console = Console(stderr=True)
+
+log = logging.getLogger(__name__)
 
 
-def _get_config(config_path: Optional[Path] = None) -> AppConfig:
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(pkg_version("agent-handler"))
+        raise typer.Exit()
+
+
+def _get_config(config_path: Path | None = None) -> AppConfig:
     cfg = load_config(config_path)
     return cfg.resolve_paths()
 
 
+def _get_gas_config(cfg: AppConfig) -> GASConfig:
+    try:
+        return load_gas_config(cfg.gas_url)
+    except RuntimeError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+
+# ------------------------------------------------------------------
+# Root callback — version + verbosity flags
+# ------------------------------------------------------------------
+
+@app.callback(invoke_without_command=True)
+def root(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False, "--version", "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version and exit.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output."),
+    debug: bool = typer.Option(False, "--debug", help="Debug-level logging."),
+) -> None:
+    """Scheduled execution of AI coding agent CLIs."""
+    setup_logging(verbose=verbose, debug=debug)
+
+
+# ------------------------------------------------------------------
+# Commands
+# ------------------------------------------------------------------
+
 @app.command()
 def sync(
-    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config.toml"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+) -> None:
     """Pull Google Sheet to local tasks JSON."""
     cfg = _get_config(config)
     sync_sheet(cfg.gas_url, cfg.google_sheet_name, cfg.tasks_csv)
@@ -50,12 +114,11 @@ def sync(
 
 @app.command()
 def run(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    csv_path: Optional[Path] = typer.Option(None, "--csv", "-f", help="Path to tasks JSON"),
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+    csv_path: Path | None = typer.Option(None, "--csv", "-f", help="Path to tasks JSON"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without executing"),
     no_sync: bool = typer.Option(False, "--no-sync", help="Skip Google Sheet sync"),
-    verbose: bool = typer.Option(False, "--verbose", "-v"),
-):
+) -> None:
     """Execute one full scheduling pass."""
     cfg = _get_config(config)
     csv_file = csv_path or cfg.tasks_csv
@@ -74,9 +137,9 @@ def run(
 
 @app.command()
 def install(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
     backend: str = typer.Option("auto", "--backend", help="Schedule backend: auto, cron, launchd"),
-):
+) -> None:
     """Verify prerequisites and install the 30-min orchestrator schedule entry."""
     cfg = _get_config(config)
     init_db(cfg.state_db)
@@ -89,9 +152,9 @@ def install(
 
 @app.command()
 def uninstall(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
     backend: str = typer.Option("auto", "--backend", help="Schedule backend: auto, cron, launchd"),
-):
+) -> None:
     """Remove the orchestrator schedule entry."""
     cfg = _get_config(config)
     uninstall_schedule(backend=backend or cfg.schedule_backend)
@@ -100,9 +163,9 @@ def uninstall(
 
 @app.command()
 def status(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    csv_path: Optional[Path] = typer.Option(None, "--csv", "-f"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+    csv_path: Path | None = typer.Option(None, "--csv", "-f", help="Path to tasks JSON"),
+) -> None:
     """Show schedule entry status and last run per task."""
     cfg = _get_config(config)
     csv_file = csv_path or cfg.tasks_csv
@@ -142,9 +205,9 @@ def status(
 
 @app.command(name="list")
 def list_tasks(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    csv_path: Optional[Path] = typer.Option(None, "--csv", "-f"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+    csv_path: Path | None = typer.Option(None, "--csv", "-f", help="Path to tasks JSON"),
+) -> None:
     """Show a rich table of tasks applicable to this host."""
     cfg = _get_config(config)
     csv_file = csv_path or cfg.tasks_csv
@@ -173,9 +236,9 @@ def list_tasks(
 
 @app.command()
 def validate(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    csv_path: Optional[Path] = typer.Option(None, "--csv", "-f"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+    csv_path: Path | None = typer.Option(None, "--csv", "-f", help="Path to tasks JSON"),
+) -> None:
     """Validate task configuration: unique IDs, dependency refs, cycles, paths."""
     cfg = _get_config(config)
     csv_file = csv_path or cfg.tasks_csv
@@ -187,8 +250,8 @@ def validate(
 
 @app.command()
 def whoami(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+) -> None:
     """Print the hostname used for task filtering."""
     cfg = _get_config(config)
     resolved = cfg.get_hostname()
@@ -203,23 +266,20 @@ def whoami(
 
 
 @app.command()
-def init():
+def init() -> None:
     """Interactive guided setup — create config, verify GAS endpoint, test sheet connectivity."""
     config_path = default_config_path()
     console.print(f"\n[bold]agent-handler init[/bold]")
     console.print(f"Config location: [cyan]{config_path}[/cyan]\n")
 
-    # Check for existing config
     if config_path.exists():
         overwrite = typer.confirm("Config file already exists. Overwrite?", default=False)
         if not overwrite:
             console.print("Keeping existing config.")
             raise typer.Exit()
 
-    # Prompt for settings
-    console.print("[dim]Tip: Deploy docs/gas-script.js from your Google Sheet (Extensions → Apps Script)[/dim]")
+    console.print("[dim]Tip: Deploy docs/gas-script.js from your Google Sheet (Extensions > Apps Script)[/dim]")
     gas_url = typer.prompt("GAS Web App URL")
-    gas_api_key = typer.prompt("GAS API key", hide_input=True)
     sheet_name = typer.prompt("Worksheet name", default="Sheet1")
 
     system_hostname = socket.gethostname()
@@ -229,7 +289,6 @@ def init():
     if use_alias:
         hostname_alias = typer.prompt("Hostname alias")
 
-    # Write config
     config_path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     if hostname_alias:
@@ -237,17 +296,21 @@ def init():
         lines.append("")
     lines.append("[sheets]")
     lines.append(f'gas_url = "{gas_url}"')
-    lines.append(f'gas_api_key = "{gas_api_key}"')
     lines.append(f'name = "{sheet_name}"')
     config_path.write_text("\n".join(lines) + "\n")
     console.print(f"\n[green]Config written to {config_path}[/green]")
 
-    # Load the config we just wrote
+    console.print()
+    console.print("Store your GAS API key:")
+    console.print("  [bold]agent-handler set-credentials[/bold]")
+    console.print()
+    console.print("[dim]Or set an environment variable:[/dim]")
+    console.print("  export AGENT_HANDLER_GAS_KEY=<your-key>")
+
     cfg = load_config(config_path).resolve_paths()
     resolved_hostname = cfg.get_hostname()
-    console.print(f"Hostname: [bold]{resolved_hostname}[/bold]")
+    console.print(f"\nHostname: [bold]{resolved_hostname}[/bold]")
 
-    # Verify GAS endpoint
     console.print("\n[bold]Checking GAS Web App...[/bold]")
     try:
         check_gas_available(cfg.gas_url)
@@ -259,15 +322,23 @@ def init():
         console.print(f"\n[green]Setup complete.[/green] Fix the GAS URL, then run [bold]agent-handler sync[/bold].")
         return
 
-    # Test sheet connectivity
     console.print("\n[bold]Testing sheet connectivity...[/bold]")
     task_count = 0
     try:
         empty = is_sheet_empty(cfg.gas_url, cfg.google_sheet_name)
         if empty:
             console.print("[yellow]Sheet is empty — no header row found.[/yellow]")
+            try:
+                gas_cfg = load_gas_config(cfg.gas_url)
+            except RuntimeError:
+                console.print("[yellow]GAS API key not set yet — skipping sheet write operations.[/yellow]")
+                console.print("Run [bold]agent-handler set-credentials[/bold], then [bold]agent-handler setup-sheet[/bold].")
+                init_db(cfg.state_db)
+                _print_init_summary(config_path, resolved_hostname, 0, cfg)
+                return
+
             if typer.confirm("Write the header row now?", default=True):
-                write_header_row(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name)
+                write_header_row(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name)
                 console.print("[green]Header row written.[/green]")
                 if typer.confirm("Add a sample task row as a template?", default=True):
                     cli_choice = typer.prompt(
@@ -276,7 +347,7 @@ def init():
                         default="claude-code",
                     )
                     project_dir = typer.prompt("Project directory", default="~/projects/example")
-                    write_sample_row(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name, cli_choice, project_dir)
+                    write_sample_row(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name, cli_choice, project_dir)
                     console.print("[green]Sample task row written.[/green]")
             else:
                 console.print("Skipped. Add the header row manually or run [bold]agent-handler setup-sheet[/bold].")
@@ -291,29 +362,32 @@ def init():
         init_db(cfg.state_db)
         return
 
-    # Init state DB
     init_db(cfg.state_db)
+    _print_init_summary(config_path, resolved_hostname, task_count, cfg)
 
-    # Summary
+
+def _print_init_summary(config_path: Path, hostname: str, task_count: int, cfg: AppConfig) -> None:
     console.print(f"\n[bold green]Setup complete![/bold green]")
     console.print(f"  Config:   {config_path}")
-    console.print(f"  Hostname: {resolved_hostname}")
+    console.print(f"  Hostname: {hostname}")
     console.print(f"  Tasks:    {task_count} found")
     console.print(f"  JSON:     {cfg.tasks_csv}")
     console.print(f"  State DB: {cfg.state_db}")
     console.print(f"\nNext steps:")
-    console.print(f"  agent-handler list       — view tasks for this host")
-    console.print(f"  agent-handler validate   — check for config errors")
-    console.print(f"  agent-handler run --dry-run — preview execution")
-    console.print(f"  agent-handler install    — set up the 30-min schedule")
+    console.print(f"  agent-handler set-credentials  — store GAS API key")
+    console.print(f"  agent-handler doctor           — verify connectivity")
+    console.print(f"  agent-handler list             — view tasks for this host")
+    console.print(f"  agent-handler run --dry-run    — preview execution")
+    console.print(f"  agent-handler install          — set up the 30-min schedule")
 
 
 @app.command(name="setup-sheet")
 def setup_sheet(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+) -> None:
     """Write the header row to an empty Google Sheet."""
     cfg = _get_config(config)
+    gas_cfg = _get_gas_config(cfg)
 
     try:
         empty = is_sheet_empty(cfg.gas_url, cfg.google_sheet_name)
@@ -326,8 +400,79 @@ def setup_sheet(
         console.print("To avoid duplicating headers, clear the sheet first if you want to reset it.")
         raise typer.Exit(code=1)
 
-    write_header_row(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name)
+    write_header_row(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name)
     console.print("[green]Header row written to the sheet.[/green]")
+
+
+@app.command("set-credentials")
+def set_credentials() -> None:
+    """Store GAS API key in macOS Keychain."""
+    api_key = typer.prompt("GAS API key", hide_input=True)
+    try:
+        write_keychain("AGENT_HANDLER_GAS_KEY", api_key)
+    except RuntimeError as exc:
+        err_console.print(f"[red]Keychain error:[/red] {exc}")
+        raise typer.Exit(code=1)
+    console.print("[green]Credentials stored in macOS Keychain.[/green]")
+
+
+@app.command()
+def doctor(
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+) -> None:
+    """Check credentials, config, and backend connectivity."""
+    cfg = _get_config(config)
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Setting")
+    table.add_column("Source")
+    table.add_column("Status")
+
+    all_ok = True
+
+    if cfg.gas_url:
+        table.add_row("gas_url", "config.toml", "[green]OK[/green]")
+    else:
+        table.add_row("gas_url", "—", "[red]MISSING[/red]")
+        all_ok = False
+
+    key, source = _resolve_secret("AGENT_HANDLER_GAS_KEY", "AGENT_HANDLER_GAS_KEY")
+    if key:
+        table.add_row("AGENT_HANDLER_GAS_KEY", source, "[green]OK[/green]")
+    else:
+        table.add_row("AGENT_HANDLER_GAS_KEY", "—", "[red]MISSING[/red]")
+        all_ok = False
+
+    from .schedule.cron import is_installed as cron_installed
+    from .schedule.launchd import is_installed as launchd_installed
+
+    if launchd_installed():
+        table.add_row("schedule", "launchd", "[green]active[/green]")
+    elif cron_installed():
+        table.add_row("schedule", "cron", "[green]active[/green]")
+    else:
+        table.add_row("schedule", "—", "[yellow]not installed[/yellow]")
+
+    console.print(table)
+
+    if not all_ok:
+        console.print()
+        console.print("[red]Fix missing credentials:[/red]")
+        if not cfg.gas_url:
+            console.print("  Set gas_url in config.toml under [sheets]")
+        if not key:
+            console.print("  agent-handler set-credentials")
+            console.print("  [dim]or[/dim] export AGENT_HANDLER_GAS_KEY=...")
+        raise typer.Exit(code=1)
+
+    console.print()
+    console.print("Testing backend connectivity...", end=" ")
+    try:
+        check_gas_available(cfg.gas_url)
+        console.print("[green]OK[/green]")
+    except RuntimeError as exc:
+        console.print(f"[red]FAILED[/red] — {exc}")
+        raise typer.Exit(code=1)
 
 
 # --- Task management subcommands ---
@@ -373,16 +518,16 @@ def _prompt_task_fields(defaults: dict | None = None) -> list[str]:
 
 @task_app.command(name="add")
 def task_add(
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+) -> None:
     """Add a new task row to the Google Sheet."""
     cfg = _get_config(config)
+    gas_cfg = _get_gas_config(cfg)
 
     console.print("\n[bold]Add a new task[/bold]\n")
     values = _prompt_task_fields()
     task_id = values[0]
 
-    # Check for duplicate ID
     headers, rows = read_sheet_rows(cfg.gas_url, cfg.google_sheet_name)
     if headers:
         id_idx = headers.index("id") if "id" in headers else 0
@@ -391,26 +536,26 @@ def task_add(
             console.print(f"[red]Task ID '{task_id}' already exists.[/red]")
             raise typer.Exit(code=1)
 
-    append_row(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name, values)
+    append_row(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name, values)
     console.print(f"[green]Task '{task_id}' added to the sheet.[/green]")
 
 
 @task_app.command(name="edit")
 def task_edit(
     task_id: str = typer.Argument(help="ID of the task to edit"),
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+) -> None:
     """Edit an existing task row in the Google Sheet."""
     cfg = _get_config(config)
+    gas_cfg = _get_gas_config(cfg)
 
-    row_num = find_row_number_by_id(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name, task_id)
+    row_num = find_row_number_by_id(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name, task_id)
     if row_num is None:
         console.print(f"[red]Task '{task_id}' not found in the sheet.[/red]")
         raise typer.Exit(code=1)
 
-    # Get current values
     headers, rows = read_sheet_rows(cfg.gas_url, cfg.google_sheet_name)
-    current_row = rows[row_num - 2]  # -2: header offset + 0-indexing
+    current_row = rows[row_num - 2]
     padded = current_row + [""] * (len(headers) - len(current_row))
     current = dict(zip(headers, padded))
 
@@ -418,19 +563,20 @@ def task_edit(
     console.print("[dim]Press Enter to keep current value.[/dim]\n")
     values = _prompt_task_fields(defaults=current)
 
-    update_row(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name, row_num, values)
+    update_row(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name, row_num, values)
     console.print(f"[green]Task '{task_id}' updated.[/green]")
 
 
 @task_app.command(name="remove")
 def task_remove(
     task_id: str = typer.Argument(help="ID of the task to remove"),
-    config: Optional[Path] = typer.Option(None, "--config", "-c"),
-):
+    config: Path | None = typer.Option(None, "--config", "-c", help="Path to config.toml"),
+) -> None:
     """Remove a task row from the Google Sheet."""
     cfg = _get_config(config)
+    gas_cfg = _get_gas_config(cfg)
 
-    row_num = find_row_number_by_id(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name, task_id)
+    row_num = find_row_number_by_id(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name, task_id)
     if row_num is None:
         console.print(f"[red]Task '{task_id}' not found in the sheet.[/red]")
         raise typer.Exit(code=1)
@@ -439,5 +585,5 @@ def task_remove(
         console.print("Cancelled.")
         raise typer.Exit()
 
-    clear_row(cfg.gas_url, cfg.gas_api_key, cfg.google_sheet_name, row_num)
+    clear_row(cfg.gas_url, gas_cfg.api_key, cfg.google_sheet_name, row_num)
     console.print(f"[green]Task '{task_id}' removed from the sheet.[/green]")

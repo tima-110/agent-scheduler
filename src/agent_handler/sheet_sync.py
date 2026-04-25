@@ -1,4 +1,5 @@
 """Google Sheets sync via GAS Web App."""
+from __future__ import annotations
 
 import json
 import shutil

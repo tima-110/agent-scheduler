@@ -1,4 +1,5 @@
 """SQLite run state management."""
+from __future__ import annotations
 
 import socket
 import sqlite3

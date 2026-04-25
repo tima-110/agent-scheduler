@@ -1,4 +1,5 @@
 """Tests for scheduler.py — is_due, topological_batches, cascade failure."""
+from __future__ import annotations
 
 import tempfile
 from datetime import datetime, timedelta

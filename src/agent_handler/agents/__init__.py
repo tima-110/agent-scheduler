@@ -1,4 +1,5 @@
 """Agent CLI runners."""
+from __future__ import annotations
 
 from .base import AgentResult, AgentRunner
 from .claude_code import ClaudeCodeRunner

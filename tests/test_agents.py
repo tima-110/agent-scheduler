@@ -1,4 +1,5 @@
 """Tests for agent runners — command construction."""
+from __future__ import annotations
 
 from pathlib import Path
 

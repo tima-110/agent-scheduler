@@ -1,4 +1,5 @@
 """Tests for state.py — SQLite operations with temp DB."""
+from __future__ import annotations
 
 import tempfile
 from pathlib import Path

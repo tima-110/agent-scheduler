@@ -1,19 +1,26 @@
-"""Tests for config.py — JSON parsing, host filtering, path expansion, TOML loading."""
+"""Tests for config.py — JSON parsing, host filtering, path expansion, TOML loading, secret resolution."""
+from __future__ import annotations
 
 import socket
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from agent_handler.config import (
     AppConfig,
     CLIChoice,
+    GASConfig,
     OutputFormat,
     ScheduleType,
     TaskEntry,
+    _resolve_secret,
     load_config,
+    load_gas_config,
     load_tasks,
+    read_keychain,
+    write_keychain,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample.json"
@@ -119,7 +126,6 @@ def test_path_expansion():
 def test_load_config_defaults_when_missing():
     cfg = load_config(Path("/nonexistent/config.toml"))
     assert cfg.gas_url == ""
-    assert cfg.gas_api_key == ""
     assert cfg.google_sheet_name == "Sheet1"
     assert cfg.hostname is None
     assert cfg.schedule_backend == "auto"
@@ -131,7 +137,6 @@ hostname = "my-macbook"
 
 [sheets]
 gas_url = "https://script.google.com/macros/s/abc123/exec"
-gas_api_key = "test-key"
 name = "Tasks"
 
 [paths]
@@ -146,11 +151,28 @@ backend = "launchd"
         cfg = load_config(Path(f.name))
 
     assert cfg.gas_url == "https://script.google.com/macros/s/abc123/exec"
-    assert cfg.gas_api_key == "test-key"
     assert cfg.google_sheet_name == "Tasks"
     assert cfg.hostname == "my-macbook"
     assert cfg.output_dir == Path("~/custom-output")
     assert cfg.schedule_backend == "launchd"
+    Path(f.name).unlink()
+
+
+def test_load_config_ignores_legacy_gas_api_key():
+    """Old config files with gas_api_key should load without error."""
+    content = b"""
+[sheets]
+gas_url = "https://example.com/exec"
+gas_api_key = "old-key-in-file"
+name = "Sheet1"
+"""
+    with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as f:
+        f.write(content)
+        f.flush()
+        cfg = load_config(Path(f.name))
+
+    assert cfg.gas_url == "https://example.com/exec"
+    assert not hasattr(cfg, "gas_api_key") or "gas_api_key" not in cfg.model_fields
     Path(f.name).unlink()
 
 
@@ -173,13 +195,68 @@ def test_default_paths_are_platform_appropriate():
     assert str(cfg.state_db).endswith("state.db")
 
 
-def test_gas_api_key_from_env(monkeypatch):
+# --- Secret resolution ---
+
+def test_resolve_secret_from_env(monkeypatch):
     monkeypatch.setenv("AGENT_HANDLER_GAS_KEY", "env-key")
-    cfg = AppConfig()
-    assert cfg.gas_api_key == "env-key"
+    value, source = _resolve_secret("AGENT_HANDLER_GAS_KEY", "AGENT_HANDLER_GAS_KEY")
+    assert value == "env-key"
+    assert source == "env"
 
 
-def test_gas_api_key_config_takes_precedence_over_env(monkeypatch):
+def test_resolve_secret_from_keychain(monkeypatch):
+    monkeypatch.delenv("AGENT_HANDLER_GAS_KEY", raising=False)
+    with patch("agent_handler.config.read_keychain", return_value="keychain-key"):
+        value, source = _resolve_secret("AGENT_HANDLER_GAS_KEY", "AGENT_HANDLER_GAS_KEY")
+    assert value == "keychain-key"
+    assert source == "keychain"
+
+
+def test_resolve_secret_missing(monkeypatch):
+    monkeypatch.delenv("AGENT_HANDLER_GAS_KEY", raising=False)
+    with patch("agent_handler.config.read_keychain", return_value=None):
+        value, source = _resolve_secret("AGENT_HANDLER_GAS_KEY", "AGENT_HANDLER_GAS_KEY")
+    assert value is None
+    assert source is None
+
+
+def test_resolve_secret_env_takes_precedence_over_keychain(monkeypatch):
     monkeypatch.setenv("AGENT_HANDLER_GAS_KEY", "env-key")
-    cfg = AppConfig(gas_api_key="config-key")
-    assert cfg.gas_api_key == "config-key"
+    with patch("agent_handler.config.read_keychain", return_value="keychain-key"):
+        value, source = _resolve_secret("AGENT_HANDLER_GAS_KEY", "AGENT_HANDLER_GAS_KEY")
+    assert value == "env-key"
+    assert source == "env"
+
+
+def test_load_gas_config_success(monkeypatch):
+    monkeypatch.setenv("AGENT_HANDLER_GAS_KEY", "test-key")
+    gas_cfg = load_gas_config("https://example.com/exec")
+    assert gas_cfg.endpoint_url == "https://example.com/exec"
+    assert gas_cfg.api_key == "test-key"
+
+
+def test_load_gas_config_missing_key(monkeypatch):
+    monkeypatch.delenv("AGENT_HANDLER_GAS_KEY", raising=False)
+    with patch("agent_handler.config.read_keychain", return_value=None):
+        with pytest.raises(RuntimeError, match="Missing GAS API key"):
+            load_gas_config("https://example.com/exec")
+
+
+def test_load_gas_config_missing_url():
+    with pytest.raises(RuntimeError, match="gas_url is not set"):
+        load_gas_config("")
+
+
+def test_read_keychain_returns_none_on_missing_binary():
+    with patch("agent_handler.config.subprocess.run", side_effect=FileNotFoundError):
+        assert read_keychain("TEST_ACCOUNT") is None
+
+
+def test_write_keychain_raises_on_failure():
+    with patch("agent_handler.config.subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            type("Result", (), {"returncode": 0})(),  # delete succeeds
+            type("Result", (), {"returncode": 1, "stderr": "denied"})(),  # add fails
+        ]
+        with pytest.raises(RuntimeError, match="Failed to write to keychain"):
+            write_keychain("TEST_ACCOUNT", "test-password")

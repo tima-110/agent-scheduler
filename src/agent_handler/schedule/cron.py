@@ -1,4 +1,5 @@
 """Cron schedule backend."""
+from __future__ import annotations
 
 from crontab import CronTab
 

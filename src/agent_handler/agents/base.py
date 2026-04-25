@@ -1,4 +1,5 @@
 """Abstract base for agent CLI runners."""
+from __future__ import annotations
 
 import shlex
 import subprocess

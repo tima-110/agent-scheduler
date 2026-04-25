@@ -1,4 +1,5 @@
 """Task configuration validation."""
+from __future__ import annotations
 
 from graphlib import CycleError, TopologicalSorter
 

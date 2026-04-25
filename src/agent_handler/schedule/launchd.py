@@ -1,5 +1,7 @@
 """launchd schedule backend for macOS."""
+from __future__ import annotations
 
+import os
 import plistlib
 import subprocess
 from pathlib import Path
@@ -16,14 +18,19 @@ def _log_dir() -> Path:
 
 def _plist_content(executable: str) -> dict:
     log_dir = _log_dir()
+    env_vars = {
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"),
+    }
+    for key in ("AGENT_HANDLER_GAS_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        val = os.environ.get(key)
+        if val:
+            env_vars[key] = val
     return {
         "Label": LABEL,
         "ProgramArguments": [executable, "run", "--no-sync"],
         "StartInterval": 1800,
         "WorkingDirectory": str(Path.home()),
-        "EnvironmentVariables": {
-            "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
-        },
+        "EnvironmentVariables": env_vars,
         "StandardOutPath": str(log_dir / "stdout.log"),
         "StandardErrorPath": str(log_dir / "stderr.log"),
     }
