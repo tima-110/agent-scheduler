@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from agent_scheduler.agents import get_runner
-from agent_scheduler.agents.claude_code import ClaudeCodeRunner
-from agent_scheduler.agents.codex import CodexRunner
-from agent_scheduler.agents.gemini import GeminiRunner
-from agent_scheduler.agents.opencode import OpenCodeRunner
-from agent_scheduler.config import CLIChoice, OutputFormat, ScheduleType, TaskEntry
+from agent_handler.agents import get_runner
+from agent_handler.agents.claude_code import ClaudeCodeRunner
+from agent_handler.agents.codex import CodexRunner
+from agent_handler.agents.gemini import GeminiRunner
+from agent_handler.agents.opencode import OpenCodeRunner
+from agent_handler.config import CLIChoice, OutputFormat, ScheduleType, TaskEntry
 
 
 def _task(cli, model="sonnet", agent=None, prompt="do something", output_format=OutputFormat.text):

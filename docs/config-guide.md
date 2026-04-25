@@ -1,9 +1,10 @@
 # Configuration Guide
 
-This guide covers how to set up the Google Sheet, configure `config.toml`, and define tasks for agent-scheduler.
+This guide covers how to set up the Google Sheet, deploy the GAS Web App, configure `config.toml`, and define tasks for agent-handler.
 
 ## Table of Contents
 
+- [Google Apps Script Setup](#google-apps-script-setup)
 - [Google Sheet Setup](#google-sheet-setup)
 - [Column Reference](#column-reference)
 - [Schedule Types](#schedule-types)
@@ -16,34 +17,78 @@ This guide covers how to set up the Google Sheet, configure `config.toml`, and d
 
 ---
 
+## Google Apps Script Setup
+
+agent-handler communicates with Google Sheets through a Web App deployed from within the sheet itself. This is a **one-time setup per spreadsheet**. Once deployed, any machine can sync and update tasks via HTTPS without installing any Google-specific tooling.
+
+### Steps
+
+1. **Create a new Google Sheet** (or open an existing one) that will hold your tasks.
+
+2. Go to **Extensions → Apps Script**.
+
+3. Delete the default `Code.gs` content and paste in the contents of [`docs/gas-script.js`](gas-script.js) from this repo.
+
+4. At the top of the script, set `API_KEY` to a secret string of your choosing:
+   ```javascript
+   const API_KEY = "my-secret-key";
+   ```
+
+5. Click **Deploy → New deployment**:
+   - Type: **Web app**
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+
+6. Click **Deploy**. Copy the deployment URL — it looks like:
+   ```
+   https://script.google.com/macros/s/AKfycb.../exec
+   ```
+
+7. Add the URL and your key to `config.toml` under `[sheets]`:
+   ```toml
+   [sheets]
+   gas_url = "https://script.google.com/macros/s/AKfycb.../exec"
+   gas_api_key = "my-secret-key"
+   name = "Sheet1"
+   ```
+
+> **Env var alternative:** Set `AGENT_HANDLER_GAS_KEY` in the environment instead of storing the key in config.toml. The env var takes effect when `gas_api_key` is blank in config.
+
+### Redeploying after script changes
+
+If you update `gas-script.js`, you must create a **new deployment** (not a new version of the existing one) to get a new URL. Update `gas_url` in config accordingly. The old URL continues working until you delete the old deployment.
+
+### Security notes
+
+- GET endpoints (read-only) are open — anyone with the URL can read your task list.
+- POST endpoints (write operations) require the `apiKey` in the request body.
+- Keep the URL confidential if your task configs are sensitive.
+
+---
+
 ## Google Sheet Setup
 
-> **Quick path:** Run `agent-scheduler init` for interactive guided setup. The steps below are for manual configuration or reference.
+> **Quick path:** Run `agent-handler init` for interactive guided setup. The steps below are for manual configuration or reference.
 
-1. **Create a new Google Sheet** (or use an existing one).
+After deploying the GAS script:
 
-2. **Add the header row** with exactly these column names. Column order is flexible — the sync uses headers, not position.
+1. **Add the header row** to your sheet. The easiest way is:
+   ```bash
+   agent-handler setup-sheet
+   ```
+   Or run `agent-handler init` and choose to write the header when prompted.
 
+   The expected column names are:
    ```
    id | enabled | host | cli | model | agent | prompt | project_dir | schedule_type | schedule_value | order | depends_on | output_dir | output_format | output_filename | cli_args
    ```
 
-3. **Share the sheet** with the Google account authorized in `gws`. The `gws` CLI handles authentication — no service accounts or API keys are stored by agent-scheduler.
+2. **Add task rows** using `agent-handler task add` or by editing the sheet directly.
 
-4. **Copy the Sheet ID** from the URL. For a URL like:
+3. **Sync** to pull the sheet to your local machine:
+   ```bash
+   agent-handler sync
    ```
-   https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms/edit
-   ```
-   The sheet ID is: `1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms`
-
-5. **Set the sheet ID** in your `config.toml` under `[sheets]`:
-
-   ```toml
-   [sheets]
-   id = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
-   ```
-
-6. If your tasks are on a worksheet other than `Sheet1`, also set `name` under `[sheets]`.
 
 ---
 
@@ -135,7 +180,7 @@ Tasks with **no dependency relationship** to the failure are unaffected. In the 
 
 ### Circular dependencies
 
-Circular dependency chains (A depends on B, B depends on A) are caught by `agent-scheduler validate` and will cause an error. Fix these in the spreadsheet before running.
+Circular dependency chains (A depends on B, B depends on A) are caught by `agent-handler validate` and will cause an error. Fix these in the spreadsheet before running.
 
 ---
 
@@ -189,7 +234,7 @@ The `{timestamp}` variable ensures filenames are collision-safe across runs. Alw
 
 ### Chaining output between tasks
 
-agent-scheduler does **not** pipe output between tasks. If a downstream task needs upstream output, write the upstream prompt to produce output at a known path, and reference that path in the downstream prompt. For example:
+agent-handler does **not** pipe output between tasks. If a downstream task needs upstream output, write the upstream prompt to produce output at a known path, and reference that path in the downstream prompt. For example:
 
 | Task | Prompt |
 |------|--------|
@@ -209,7 +254,7 @@ A single Google Sheet can drive tasks across multiple machines. Each machine:
 ### Finding your hostname
 
 ```bash
-agent-scheduler whoami
+agent-handler whoami
 ```
 
 This prints the resolved hostname — either your config alias or the system default. Use this value in the `host` column.
@@ -236,11 +281,12 @@ Use this alias in the sheet's `host` column instead of the raw system hostname. 
 
 Each machine needs:
 
-1. `agent-scheduler` installed (`pipx install .`)
-2. A `config.toml` in the platform config directory (can be identical across machines — paths use `~`)
-3. `gws` CLI authorized (`gws auth login`)
-4. The relevant agent CLIs installed and authenticated
-5. `agent-scheduler install` to set up the local schedule
+1. `agent-handler` installed (`pipx install .`)
+2. A `config.toml` pointing to the same GAS Web App URL (can be identical across machines — paths use `~`)
+3. The relevant agent CLIs installed and authenticated
+4. `agent-handler install` to set up the local schedule
+
+No Google credentials or OAuth setup is required on each machine — all access goes through the GAS Web App URL.
 
 ---
 
@@ -248,8 +294,8 @@ Each machine needs:
 
 The config file lives at the platform-standard location:
 
-- **macOS:** `~/Library/Application Support/agent-scheduler/config.toml`
-- **Linux:** `~/.config/agent-scheduler/config.toml`
+- **macOS:** `~/Library/Application Support/agent-handler/config.toml`
+- **Linux:** `~/.config/agent-handler/config.toml`
 
 Override with `--config /path/to/config.toml` on any command.
 
@@ -260,14 +306,15 @@ Copy `config.example.toml` from the repo to get started:
 # hostname = "my-macbook"
 
 [sheets]
-id = "YOUR_GOOGLE_SHEET_ID"
+gas_url = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
+gas_api_key = "your-secret-key"   # or set AGENT_HANDLER_GAS_KEY env var
 name = "Sheet1"
 
 # [paths]
 # tasks_csv = "~/custom/path/tasks.json"
 # output_dir = "~/agent-output"
 # state_db = "~/custom/path/state.db"
-# log_file = "~/custom/path/agent-scheduler.log"
+# log_file = "~/custom/path/agent-handler.log"
 
 # [schedule]
 # backend = "auto"
@@ -278,16 +325,17 @@ name = "Sheet1"
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
 | *(top-level)* | `hostname` | system hostname | Friendly alias for task filtering |
-| `[sheets]` | `id` | *(none)* | Google Sheet ID from the URL |
+| `[sheets]` | `gas_url` | *(none)* | Deployed GAS Web App URL |
+| `[sheets]` | `gas_api_key` | *(none)* | API key for write operations (or `AGENT_HANDLER_GAS_KEY` env var) |
 | `[sheets]` | `name` | `Sheet1` | Worksheet tab name |
 | `[paths]` | `tasks_csv` | platform data dir / `tasks.json` | Where the synced tasks file is stored |
 | `[paths]` | `output_dir` | `~/agent-output` | Default output directory |
 | `[paths]` | `state_db` | platform data dir / `state.db` | SQLite database path |
-| `[paths]` | `log_file` | platform log dir / `agent-scheduler.log` | Log file path |
+| `[paths]` | `log_file` | platform log dir / `agent-handler.log` | Log file path |
 | `[schedule]` | `backend` | `auto` | `auto`, `cron`, or `launchd` |
 
-**Platform data dir:** macOS `~/Library/Application Support/agent-scheduler/`, Linux `~/.local/share/agent-scheduler/`
-**Platform log dir:** macOS `~/Library/Logs/agent-scheduler/`, Linux `~/.local/state/agent-scheduler/log/`
+**Platform data dir:** macOS `~/Library/Application Support/agent-handler/`, Linux `~/.local/share/agent-handler/`
+**Platform log dir:** macOS `~/Library/Logs/agent-handler/`, Linux `~/.local/state/agent-handler/log/`
 
 ---
 
@@ -336,7 +384,7 @@ name = "Sheet1"
 
 ## Validation
 
-Run `agent-scheduler validate` to check your configuration before going live. It verifies:
+Run `agent-handler validate` to check your configuration before going live. It verifies:
 
 | Check | What it catches |
 |-------|-----------------|
@@ -359,4 +407,4 @@ Validation failed with 2 error(s):
   x Task 'report' depends on unknown task 'missing-task'
 ```
 
-Fix the errors in the Google Sheet, run `agent-scheduler sync` to re-pull, and validate again.
+Fix the errors in the Google Sheet, run `agent-handler sync` to re-pull, and validate again.

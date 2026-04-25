@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from agent_scheduler.config import CLIChoice, ScheduleType, TaskEntry
-from agent_scheduler.scheduler import (
+from agent_handler.config import CLIChoice, ScheduleType, TaskEntry
+from agent_handler.scheduler import (
     is_due,
     parse_hhmm,
     parse_interval,
     topological_batches,
 )
-from agent_scheduler.state import init_db, record_run
+from agent_handler.state import init_db, record_run
 
 HOSTNAME = "test-host"
 

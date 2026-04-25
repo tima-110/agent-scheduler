@@ -6,12 +6,12 @@ from pathlib import Path
 
 import platformdirs
 
-LABEL = "com.agent-scheduler"
+LABEL = "com.agent-handler"
 PLIST_PATH = Path("~/Library/LaunchAgents") / f"{LABEL}.plist"
 
 
 def _log_dir() -> Path:
-    return Path(platformdirs.user_log_dir("agent-scheduler"))
+    return Path(platformdirs.user_log_dir("agent-handler"))
 
 
 def _plist_content(executable: str) -> dict:
@@ -29,7 +29,7 @@ def _plist_content(executable: str) -> dict:
     }
 
 
-def install_launchd(executable: str = "agent-scheduler") -> None:
+def install_launchd(executable: str = "agent-handler") -> None:
     plist_path = PLIST_PATH.expanduser()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 

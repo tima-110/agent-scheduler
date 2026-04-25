@@ -13,7 +13,7 @@ def detect_backend() -> str:
     return "cron"
 
 
-def install_schedule(backend: str = "auto", executable: str = "agent-scheduler"):
+def install_schedule(backend: str = "auto", executable: str = "agent-handler"):
     if backend == "auto":
         backend = detect_backend()
     if backend == "launchd":

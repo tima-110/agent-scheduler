@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from agent_scheduler.state import get_last_run, init_db, record_run
+from agent_handler.state import get_last_run, init_db, record_run
 
 HOSTNAME = "test-host"
 

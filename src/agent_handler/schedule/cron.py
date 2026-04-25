@@ -2,10 +2,10 @@
 
 from crontab import CronTab
 
-COMMENT = "agent-scheduler-orchestrator"
+COMMENT = "agent-handler-orchestrator"
 
 
-def install_cron(executable: str = "agent-scheduler") -> None:
+def install_cron(executable: str = "agent-handler") -> None:
     cron = CronTab(user=True)
     cron.remove_all(comment=COMMENT)
     job = cron.new(

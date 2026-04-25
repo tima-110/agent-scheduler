@@ -1,11 +1,11 @@
 # TODO
 
 ## Ideas
-- [ ] Rename CLI to `agent-handler` (or similar)
-- [ ] Write a sample/example task row when initializing the sheet (after header) so the user has a template to follow
-- [ ] Interactive CLI for managing task rows — guided add/remove/edit of schedule entries directly from the terminal (no need to open the sheet manually)
+- [x] Rename CLI to `agent-handler`
+- [x] Write a sample/example task row when initializing the sheet (after header) so the user has a template to follow
+- [x] Interactive CLI for managing task rows — `agent-handler task add/edit/remove`
 
-- [ ] Consider `stream-json` as an output format option — Claude Code supports `--output-format stream-json` for realtime streaming output
+- [x] Add `stream-json` as an output format option — Claude Code and Gemini support `--output-format stream-json`
 - [x] Make `model` optional in TaskEntry — agent CLIs have their own defaults; only pass `--model` if explicitly set
 
 ## Fixes

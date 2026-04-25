@@ -1,8 +1,8 @@
-# agent-scheduler
+# agent-handler
 
 Scheduled execution of AI coding agent CLIs from a shared Google Sheet.
 
-agent-scheduler reads a task configuration spreadsheet, syncs it locally as JSON, resolves execution order and dependencies, runs the appropriate agent CLI (Claude Code, Codex CLI, Gemini CLI, or OpenCode), and records results in a local SQLite database. A single Google Sheet drives multiple machines — each host filters tasks by hostname and maintains independent state.
+agent-handler reads a task configuration spreadsheet, syncs it locally as JSON, resolves execution order and dependencies, runs the appropriate agent CLI (Claude Code, Codex CLI, Gemini CLI, or OpenCode), and records results in a local SQLite database. A single Google Sheet drives multiple machines — each host filters tasks by hostname and maintains independent state.
 
 ## Supported CLIs
 
@@ -18,9 +18,38 @@ agent-scheduler reads a task configuration spreadsheet, syncs it locally as JSON
 ## Prerequisites
 
 - **Python 3.11+**
-- **[gws CLI](https://github.com/nicholasgasior/gws)** — installed and authorized (`gws auth login`)
+- **A Google Sheet** with the agent-handler GAS script deployed (see [Google Apps Script Setup](#google-apps-script-setup) below)
 - **Agent CLIs** — whichever you plan to use must be installed and pre-authenticated on each host
 - Each agent CLI must be on `PATH` in the environment where the scheduler runs (relevant for cron/launchd)
+
+## Google Apps Script Setup
+
+This is a one-time setup per spreadsheet. It deploys a lightweight JSON API directly from your Google Sheet, eliminating any third-party CLI dependency.
+
+1. **Create a new Google Sheet** (or open an existing one) that will hold your tasks.
+
+2. Open **Extensions → Apps Script**.
+
+3. Delete the default `Code.gs` content and paste in the contents of [`docs/gas-script.js`](docs/gas-script.js) from this repo.
+
+4. Set the `API_KEY` constant at the top of the script to a secret string of your choosing.
+
+5. Click **Deploy → New deployment**:
+   - Type: **Web app**
+   - Execute as: **Me**
+   - Who has access: **Anyone**
+
+6. Click **Deploy** and copy the deployment URL.
+
+7. Add the URL and your API key to `config.toml`:
+   ```toml
+   [sheets]
+   gas_url = "<paste deployment URL here>"
+   gas_api_key = "<same key from the script>"
+   name = "Sheet1"
+   ```
+
+> **Tip:** You can also set `AGENT_HANDLER_GAS_KEY` as an environment variable instead of storing the key in config.toml.
 
 ## Installation
 
@@ -35,48 +64,50 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# 1. Run the guided setup (creates config, verifies gws, tests sheet access)
-agent-scheduler init
+# 1. Deploy docs/gas-script.js to your Google Sheet (see above)
 
-# 2. Validate your task configuration
-agent-scheduler validate
+# 2. Run the guided setup (creates config, tests endpoint, verifies sheet access)
+agent-handler init
 
-# 3. Preview what would run
-agent-scheduler run --dry-run
+# 3. Validate your task configuration
+agent-handler validate
 
-# 4. Run a scheduling pass manually
-agent-scheduler run --no-sync
+# 4. Preview what would run
+agent-handler run --dry-run
 
-# 5. Install the 30-minute orchestrator schedule
-agent-scheduler install
+# 5. Run a scheduling pass manually
+agent-handler run --no-sync
+
+# 6. Install the 30-minute orchestrator schedule
+agent-handler install
 ```
 
-The `init` command prompts for your Google Sheet ID, worksheet name, and optional hostname alias, then writes `config.toml`, verifies gws is authorized, and confirms it can read the sheet. See [docs/config-guide.md](docs/config-guide.md) for manual setup and the full column reference.
+The `init` command prompts for your GAS Web App URL, API key, and worksheet name, then writes `config.toml`, verifies the endpoint is reachable, and confirms it can read the sheet. See [docs/config-guide.md](docs/config-guide.md) for manual setup and the full column reference.
 
 ## CLI Reference
 
-### `agent-scheduler init`
+### `agent-handler init`
 
-Interactive guided setup. Prompts for Google Sheet ID, worksheet name, and hostname alias. Creates `config.toml`, verifies gws authorization, tests sheet connectivity, and initializes the state database.
+Interactive guided setup. Prompts for GAS Web App URL, API key, worksheet name, and optional hostname alias. Creates `config.toml`, verifies the GAS endpoint, tests sheet connectivity, and initializes the state database.
 
 ```
-agent-scheduler init
+agent-handler init
 ```
 
-### `agent-scheduler sync`
+### `agent-handler sync`
 
 Pull the Google Sheet to a local JSON file.
 
 ```
-agent-scheduler sync [--config/-c PATH]
+agent-handler sync [--config/-c PATH]
 ```
 
-### `agent-scheduler run`
+### `agent-handler run`
 
 Execute one full scheduling pass — sync, filter, and run due tasks.
 
 ```
-agent-scheduler run [--config/-c PATH] [--csv/-f PATH] [--dry-run] [--no-sync] [--verbose/-v]
+agent-handler run [--config/-c PATH] [--csv/-f PATH] [--dry-run] [--no-sync] [--verbose/-v]
 ```
 
 | Flag | Description |
@@ -86,46 +117,46 @@ agent-scheduler run [--config/-c PATH] [--csv/-f PATH] [--dry-run] [--no-sync] [
 | `--csv/-f` | Override the tasks file path from config |
 | `--verbose/-v` | Verbose output |
 
-### `agent-scheduler install`
+### `agent-handler install`
 
 Verify prerequisites and install a 30-minute orchestrator schedule entry.
 
 ```
-agent-scheduler install [--config/-c PATH] [--backend auto|cron|launchd]
+agent-handler install [--config/-c PATH] [--backend auto|cron|launchd]
 ```
 
-Auto-detects the backend: **launchd** on macOS, **cron** elsewhere. The installed job runs `agent-scheduler run --no-sync` every 30 minutes.
+Auto-detects the backend: **launchd** on macOS, **cron** elsewhere. The installed job runs `agent-handler run --no-sync` every 30 minutes.
 
-### `agent-scheduler uninstall`
+### `agent-handler uninstall`
 
 Remove the orchestrator schedule entry.
 
 ```
-agent-scheduler uninstall [--config/-c PATH] [--backend auto|cron|launchd]
+agent-handler uninstall [--config/-c PATH] [--backend auto|cron|launchd]
 ```
 
-### `agent-scheduler status`
+### `agent-handler status`
 
 Show whether the schedule is active and the last run result per task.
 
 ```
-agent-scheduler status [--config/-c PATH] [--csv/-f PATH]
+agent-handler status [--config/-c PATH] [--csv/-f PATH]
 ```
 
-### `agent-scheduler list`
+### `agent-handler list`
 
 Display a rich table of all tasks applicable to this host.
 
 ```
-agent-scheduler list [--config/-c PATH] [--csv/-f PATH]
+agent-handler list [--config/-c PATH] [--csv/-f PATH]
 ```
 
-### `agent-scheduler validate`
+### `agent-handler validate`
 
 Check task configuration for errors. Exits with code 1 on failure.
 
 ```
-agent-scheduler validate [--config/-c PATH] [--csv/-f PATH]
+agent-handler validate [--config/-c PATH] [--csv/-f PATH]
 ```
 
 Checks:
@@ -134,12 +165,12 @@ Checks:
 - No circular dependencies
 - `project_dir` paths exist on this machine
 
-### `agent-scheduler whoami`
+### `agent-handler whoami`
 
 Print the hostname used for task filtering.
 
 ```
-agent-scheduler whoami [--config/-c PATH]
+agent-handler whoami [--config/-c PATH]
 ```
 
 Shows the resolved hostname (from `config.toml` alias or system default). Use this value in the `host` column of your Google Sheet.
@@ -150,7 +181,7 @@ Shows the resolved hostname (from `config.toml` alias or system default). Use th
 
 The orchestrator runs every **30 minutes** via cron or launchd. Each pass:
 
-1. **Sync** — pulls the Google Sheet to a local JSON file (skipped with `--no-sync`)
+1. **Sync** — pulls the Google Sheet via the GAS Web App to a local JSON file (skipped with `--no-sync`)
 2. **Filter** — keeps only tasks that are `enabled=true` and match this host
 3. **Due check** — determines which tasks are due based on their schedule type
 4. **Topological sort** — groups tasks into ordered batches using `depends_on` and `order`
@@ -183,7 +214,7 @@ A single Google Sheet can drive multiple machines. Each machine:
 Find your machine's hostname with:
 
 ```bash
-agent-scheduler whoami
+agent-handler whoami
 ```
 
 You can set a friendly alias in `config.toml` so you don't have to use the raw system hostname:
@@ -192,12 +223,21 @@ You can set a friendly alias in `config.toml` so you don't have to use the raw s
 hostname = "my-macbook"
 ```
 
+### Per-machine setup
+
+Each machine needs:
+
+1. `agent-handler` installed (`pipx install .`)
+2. A `config.toml` pointing to the same GAS Web App URL (can be identical across machines — paths use `~`)
+3. The relevant agent CLIs installed and authenticated
+4. `agent-handler install` to set up the local schedule
+
 ## Configuration
 
 Configuration lives in a `config.toml` file at the platform-standard location:
 
-- **macOS:** `~/Library/Application Support/agent-scheduler/config.toml`
-- **Linux:** `~/.config/agent-scheduler/config.toml`
+- **macOS:** `~/Library/Application Support/agent-handler/config.toml`
+- **Linux:** `~/.config/agent-handler/config.toml`
 
 Override with `--config /path/to/config.toml` on any command.
 
@@ -216,19 +256,19 @@ pytest tests/ -v
 ## Architecture
 
 ```
-Google Sheet  ──gws CLI──>  local JSON  ──load_tasks()──>  TaskEntry models
-                                                                │
-                           SQLite DB  <──record_run()──  scheduler.run_pass()
-                                                                │
-                                                    ┌───────────┼───────────┐
-                                                    v           v           v
-                                              batch 1      batch 2      batch N
-                                             (concurrent)  (concurrent)  (concurrent)
-                                                    │           │           │
-                                                    v           v           v
-                                              AgentRunner  AgentRunner  AgentRunner
-                                              (subprocess)  (subprocess)  (subprocess)
-                                                    │           │           │
-                                                    v           v           v
-                                              output/writer  output/writer  output/writer
+Google Sheet  ──GAS Web App──>  HTTP JSON  ──load_tasks()──>  TaskEntry models
+                                                                    │
+                               SQLite DB  <──record_run()──  scheduler.run_pass()
+                                                                    │
+                                                        ┌───────────┼───────────┐
+                                                        v           v           v
+                                                  batch 1      batch 2      batch N
+                                                 (concurrent)  (concurrent)  (concurrent)
+                                                        │           │           │
+                                                        v           v           v
+                                                  AgentRunner  AgentRunner  AgentRunner
+                                                  (subprocess)  (subprocess)  (subprocess)
+                                                        │           │           │
+                                                        v           v           v
+                                                  output/writer  output/writer  output/writer
 ```

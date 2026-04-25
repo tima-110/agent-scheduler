@@ -1,6 +1,7 @@
 """Pydantic models for task configuration and app settings."""
 
 import json
+import os
 import socket
 import tomllib
 from enum import Enum
@@ -10,7 +11,7 @@ from typing import Optional
 import platformdirs
 from pydantic import BaseModel, field_validator
 
-APP_NAME = "agent-scheduler"
+APP_NAME = "agent-handler"
 
 
 class CLIChoice(str, Enum):
@@ -29,6 +30,7 @@ class OutputFormat(str, Enum):
     text = "text"
     json = "json"
     markdown = "markdown"
+    stream_json = "stream-json"
 
 
 class TaskEntry(BaseModel):
@@ -96,7 +98,8 @@ def _default_log_dir() -> Path:
 
 
 class AppConfig(BaseModel):
-    google_sheet_id: str = ""
+    gas_url: str = ""
+    gas_api_key: str = ""
     google_sheet_name: str = "Sheet1"
     hostname: Optional[str] = None
     tasks_csv: Path = None
@@ -111,7 +114,10 @@ class AppConfig(BaseModel):
         if self.state_db is None:
             self.state_db = _default_data_dir() / "state.db"
         if self.log_file is None:
-            self.log_file = _default_log_dir() / "agent-scheduler.log"
+            self.log_file = _default_log_dir() / "agent-handler.log"
+        # Allow env var override for the API key
+        if not self.gas_api_key:
+            self.gas_api_key = os.environ.get("AGENT_HANDLER_GAS_KEY", "")
 
     def get_hostname(self) -> str:
         return self.hostname or socket.gethostname()
@@ -140,8 +146,10 @@ def load_config(path: Path | None = None) -> AppConfig:
     flat = {}
     # [sheets] section
     sheets = raw.get("sheets", {})
-    if "id" in sheets:
-        flat["google_sheet_id"] = sheets["id"]
+    if "gas_url" in sheets:
+        flat["gas_url"] = sheets["gas_url"]
+    if "gas_api_key" in sheets:
+        flat["gas_api_key"] = sheets["gas_api_key"]
     if "name" in sheets:
         flat["google_sheet_name"] = sheets["name"]
 

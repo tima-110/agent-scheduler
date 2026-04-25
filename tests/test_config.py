@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_scheduler.config import (
+from agent_handler.config import (
     AppConfig,
     CLIChoice,
     OutputFormat,
@@ -118,7 +118,8 @@ def test_path_expansion():
 
 def test_load_config_defaults_when_missing():
     cfg = load_config(Path("/nonexistent/config.toml"))
-    assert cfg.google_sheet_id == ""
+    assert cfg.gas_url == ""
+    assert cfg.gas_api_key == ""
     assert cfg.google_sheet_name == "Sheet1"
     assert cfg.hostname is None
     assert cfg.schedule_backend == "auto"
@@ -129,7 +130,8 @@ def test_load_config_from_toml():
 hostname = "my-macbook"
 
 [sheets]
-id = "abc123"
+gas_url = "https://script.google.com/macros/s/abc123/exec"
+gas_api_key = "test-key"
 name = "Tasks"
 
 [paths]
@@ -143,7 +145,8 @@ backend = "launchd"
         f.flush()
         cfg = load_config(Path(f.name))
 
-    assert cfg.google_sheet_id == "abc123"
+    assert cfg.gas_url == "https://script.google.com/macros/s/abc123/exec"
+    assert cfg.gas_api_key == "test-key"
     assert cfg.google_sheet_name == "Tasks"
     assert cfg.hostname == "my-macbook"
     assert cfg.output_dir == Path("~/custom-output")
@@ -163,10 +166,20 @@ def test_get_hostname_without_alias():
 
 def test_default_paths_are_platform_appropriate():
     cfg = AppConfig()
-    # Should not contain hardcoded ~/.local/share on any platform
-    # Just verify they're set and non-empty
     assert cfg.tasks_csv is not None
     assert cfg.state_db is not None
     assert cfg.log_file is not None
     assert str(cfg.tasks_csv).endswith("tasks.json")
     assert str(cfg.state_db).endswith("state.db")
+
+
+def test_gas_api_key_from_env(monkeypatch):
+    monkeypatch.setenv("AGENT_HANDLER_GAS_KEY", "env-key")
+    cfg = AppConfig()
+    assert cfg.gas_api_key == "env-key"
+
+
+def test_gas_api_key_config_takes_precedence_over_env(monkeypatch):
+    monkeypatch.setenv("AGENT_HANDLER_GAS_KEY", "env-key")
+    cfg = AppConfig(gas_api_key="config-key")
+    assert cfg.gas_api_key == "config-key"

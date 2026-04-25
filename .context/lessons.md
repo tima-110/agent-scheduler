@@ -1,4 +1,4 @@
-# Lessons Learned — agent-scheduler
+# Lessons Learned — agent-handler
 
 Project-specific insights. If an entry turns out to apply broadly to other
 projects using the same tool or pattern, copy it to ~/practices/lessons.md.
