@@ -485,7 +485,7 @@ def _prompt_task_fields(defaults: dict | None = None) -> list[str]:
     host = typer.prompt("Host (comma-separated, blank=all)", default=d.get("host", ""))
     cli = typer.prompt(
         "CLI",
-        type=typer.Choice([c.value for c in CLIChoice]),
+        type=CLIChoice,
         default=d.get("cli", "claude-code"),
     )
     model = typer.prompt("Model (blank=CLI default)", default=d.get("model", ""))
@@ -493,17 +493,24 @@ def _prompt_task_fields(defaults: dict | None = None) -> list[str]:
     prompt = typer.prompt("Prompt", default=d.get("prompt", ""))
     project_dir = typer.prompt("Project directory", default=d.get("project_dir", "~/projects/example"))
     schedule_type = typer.prompt(
-        "Schedule type",
-        type=typer.Choice([s.value for s in ScheduleType]),
+        "Schedule type (time, frequency)",
+        type=ScheduleType,
         default=d.get("schedule_type", "frequency"),
     )
-    schedule_value = typer.prompt("Schedule value", default=d.get("schedule_value", "1h"))
+    
+    # Determine default schedule value based on type
+    if d.get("schedule_value"):
+        default_val = d.get("schedule_value")
+    else:
+        default_val = "09:00" if schedule_type == ScheduleType.time else "1h"
+
+    schedule_value = typer.prompt("Schedule value", default=default_val)
     order = typer.prompt("Order", default=d.get("order", "0"))
     depends_on = typer.prompt("Depends on (comma-separated IDs)", default=d.get("depends_on", ""))
     output_dir = typer.prompt("Output directory (blank=global default)", default=d.get("output_dir", ""))
     output_format = typer.prompt(
         "Output format",
-        type=typer.Choice([f.value for f in OutputFormat]),
+        type=OutputFormat,
         default=d.get("output_format", "text"),
     )
     output_filename = typer.prompt("Output filename template", default=d.get("output_filename", "{id}-{timestamp}.{ext}"))
